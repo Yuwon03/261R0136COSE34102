@@ -1,0 +1,42 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging artifacts
+*.egg-info/
+build/
+dist/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local environment and secrets
+.env
+.env.*
+*.pem
+
+# Runtime outputs
+output/
+logs/
+wandb/
+
+# Large or generated datasets.
+# Keep the small bundled smoke fixtures under version control.
+data/*.jsonl
+!data/smoke_dataset.jsonl
+!data/smoke_corpus.jsonl
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
