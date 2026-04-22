@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crosslingual-rewrite"
+version = "0.1.0"
+description = "Retrieval-Aware Cross-Lingual Query Rewriting for Korean Questions."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "COSE461 Project" },
+]
+keywords = [
+    "information-retrieval",
+    "query-rewriting",
+    "cross-lingual",
+    "korean",
+]
+
+dependencies = [
+    "pyyaml>=6.0",
+    "torch>=2.0",
+    "transformers>=4.30",
+    "datasets>=2.10",
+]
+
+[project.optional-dependencies]
+peft = [
+    "peft>=0.4",
+    "accelerate>=0.20",
+]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

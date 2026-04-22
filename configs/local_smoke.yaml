@@ -1,0 +1,41 @@
+experiment:
+  name: local-smoke
+  task_type: evaluation
+  seed: 13
+
+data:
+  dataset_path: data/smoke_dataset.jsonl
+  corpus_path: data/smoke_corpus.jsonl
+  split: train
+
+model:
+  base_model: google/mt5-small
+  checkpoint_dir: output/checkpoints/supervised
+  max_input_length: 256
+  max_output_length: 64
+  use_mock_model_for_smoke: true
+
+training:
+  epochs: 1
+  batch_size: 2
+  learning_rate: 0.0002
+  retrieval_loss_weight: 0.5
+  output_dir: output/checkpoints
+
+retriever:
+  backend: bm25
+  top_k: 5
+
+evaluation:
+  top_k: 5
+  metrics:
+    - recall_at_k
+    - mrr
+    - ndcg
+    - source_diversity
+    - source_language_ratio
+    - faithfulness
+
+output:
+  runs_dir: output/runs
+  analysis_dir: output/analysis
