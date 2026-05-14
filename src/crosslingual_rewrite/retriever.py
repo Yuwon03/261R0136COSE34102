@@ -24,6 +24,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass
+from heapq import nsmallest
 from typing import Iterable, Sequence
 
 from .data import CorpusDocument, RetrievedDocument
@@ -114,13 +115,18 @@ class BM25Retriever:
         self._k1 = k1
         self._b = b
         self._indexed: list[_IndexedDoc] = []
+        self._doc_index_by_id: dict[str, int] = {}
+        self._postings: dict[str, list[int]] = {}
         doc_freq: Counter[str] = Counter()
         for doc in documents:
             field_text = " ".join(filter(None, [doc.title, doc.text]))
             tokens = tokenize(field_text)
             tf = Counter(tokens)
+            doc_index = len(self._indexed)
             for term in tf:
                 doc_freq[term] += 1
+                self._postings.setdefault(term, []).append(doc_index)
+            self._doc_index_by_id[doc.doc_id] = doc_index
             self._indexed.append(
                 _IndexedDoc(
                     doc_id=doc.doc_id,
@@ -158,11 +164,23 @@ class BM25Retriever:
     def score(self, query: str, doc_id: str) -> float:
         """Return the BM25 score of ``doc_id`` for the given query."""
 
-        for doc in self._indexed:
-            if doc.doc_id == doc_id:
-                query_tokens = tokenize(query)
-                return self._score_document(query_tokens, doc)
-        raise KeyError(f"Unknown doc_id: {doc_id}")
+        doc_index = self._doc_index_by_id.get(doc_id)
+        if doc_index is None:
+            raise KeyError(f"Unknown doc_id: {doc_id}")
+        query_tokens = tokenize(query)
+        return self._score_document(query_tokens, self._indexed[doc_index])
+
+    def _candidate_indices(self, query_tokens: Iterable[str]) -> set[int]:
+        candidates: set[int] = set()
+        seen: set[str] = set()
+        for term in query_tokens:
+            if term in seen:
+                continue
+            seen.add(term)
+            postings = self._postings.get(term)
+            if postings:
+                candidates.update(postings)
+        return candidates
 
     def _score_document(self, query_tokens: Iterable[str], doc: _IndexedDoc) -> float:
         if not self._num_docs or doc.length == 0:
@@ -204,12 +222,32 @@ class BM25Retriever:
             return []
 
         query_tokens = tokenize(query)
+        candidate_indices = self._candidate_indices(query_tokens)
+
+        if candidate_indices:
+            docs_to_score = [self._indexed[index] for index in candidate_indices]
+        else:
+            docs_to_score = []
+
         scored: list[tuple[float, str, _IndexedDoc]] = []
-        for doc in self._indexed:
+        for doc in docs_to_score:
             score = self._score_document(query_tokens, doc)
             scored.append((score, doc.doc_id, doc))
-        # Stable sort: highest score first, then ascending doc_id.
-        scored.sort(key=lambda item: (-item[0], item[1]))
+        if len(scored) > top_k:
+            scored = nsmallest(top_k, scored, key=lambda item: (-item[0], item[1]))
+        else:
+            scored.sort(key=lambda item: (-item[0], item[1]))
+
+        if len(scored) < top_k:
+            selected_doc_ids = {doc_id for _score, doc_id, _doc in scored}
+            for doc in self._indexed:
+                if doc.doc_id in selected_doc_ids:
+                    continue
+                scored.append((0.0, doc.doc_id, doc))
+                selected_doc_ids.add(doc.doc_id)
+                if len(scored) >= top_k:
+                    break
+
         results: list[RetrievedDocument] = []
         for rank, (score, _doc_id, doc) in enumerate(scored[:top_k], start=1):
             results.append(
