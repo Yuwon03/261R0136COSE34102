@@ -21,6 +21,8 @@ from .retriever import BM25Retriever
 
 SourceName = Literal["mkqa", "xor_tydi"]
 
+_XOR_LANG_LABELS: tuple[str, ...] = ("ar", "bn", "fi", "ja", "ko", "ru", "te")
+
 
 @dataclass(frozen=True)
 class SourceQuestion:
@@ -118,6 +120,8 @@ def _answer_texts_from_mkqa(raw_answers: Any) -> tuple[str, ...]:
 
 
 def _answer_texts_from_xor(raw_answers: Any) -> tuple[str, ...]:
+    if isinstance(raw_answers, str):
+        return _dedupe_keep_order([raw_answers])
     if isinstance(raw_answers, Sequence) and not isinstance(raw_answers, (str, bytes)):
         return _dedupe_keep_order(_clean_text(item) for item in raw_answers)
     return _dedupe_keep_order([_clean_text(raw_answers)])
@@ -157,7 +161,11 @@ def _xor_target_query(record: Mapping[str, Any]) -> str:
 
 
 def _xor_source_question(record: Mapping[str, Any], *, split_name: str) -> SourceQuestion | None:
-    lang = _clean_text(record.get("lang") or record.get("language")).lower()
+    lang_raw = record.get("lang") if record.get("lang") is not None else record.get("language")
+    if isinstance(lang_raw, int) and 0 <= lang_raw < len(_XOR_LANG_LABELS):
+        lang = _XOR_LANG_LABELS[lang_raw]
+    else:
+        lang = _clean_text(lang_raw).lower()
     if lang and lang != "ko":
         return None
     question_ko = _clean_text(record.get("question") or record.get("query"))

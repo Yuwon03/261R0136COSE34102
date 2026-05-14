@@ -23,7 +23,9 @@ dependencies = [
     "pyyaml>=6.0",
     "torch>=2.0",
     "transformers>=4.30",
-    "datasets>=2.10",
+    "datasets>=2.10,<4.0",
+    "sentencepiece>=0.1.99",
+    "sacremoses>=0.1.1",
 ]
 
 [project.optional-dependencies]

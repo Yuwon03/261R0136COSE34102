@@ -309,6 +309,55 @@ and `lang`, but not always an English query field. For XOR-TyDi, add one of
 `target_query`, `question_en`, `query_en`, `english_question`, or
 `translated_question` before collection.
 
+For an external translation workflow, first export XOR-TyDi Korean questions
+without calling any API:
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_xor_translation.py export \
+  --jsonl-output data/xor_tydi_ko_attrs.jsonl \
+  --query-list-output data/xor_tydi_ko_queries.txt \
+  --query-chunks-dir data/xor_tydi_ko_query_chunks \
+  --chunk-size 100 \
+  --split train
+```
+
+`data/xor_tydi_ko_attrs.jsonl` keeps the Korean question, answers, ids, and
+metadata. `data/xor_tydi_ko_queries.txt` is a comma-separated list of Korean
+questions intended for an external translation tool. The optional
+`--query-chunks-dir` writes smaller numbered text files with the same order,
+which is safer for manual or chat-based translation. You can also split an
+already exported list:
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_xor_translation.py split \
+  --query-list-input data/xor_tydi_ko_queries.txt \
+  --output-dir data/xor_tydi_ko_query_chunks \
+  --chunk-size 100
+```
+
+Put the translated comma-separated English queries in
+`data/xor_tydi_en_queries.txt`, or in a matching English chunk directory,
+preserving the exact order. Before merging, validate that Korean and English
+contain the same number of question-mark-delimited queries:
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_xor_translation.py validate \
+  --korean-query-list data/xor_tydi_ko_query_chunks \
+  --english-query-list data/xor_tydi_en_query_chunks
+```
+
+Then merge them back:
+
+```bash
+PYTHONPATH=src python3 scripts/prepare_xor_translation.py merge \
+  --jsonl-input data/xor_tydi_ko_attrs.jsonl \
+  --english-query-list data/xor_tydi_en_queries.txt \
+  --output-jsonl data/xor_tydi_ko_with_target_query.jsonl
+```
+
+Then run `scripts/collect_dataset.py --source xor_tydi --input-jsonl
+data/xor_tydi_ko_with_target_query.jsonl ...` as shown above.
+
 The same builder can be called from Jupyter:
 
 ```python

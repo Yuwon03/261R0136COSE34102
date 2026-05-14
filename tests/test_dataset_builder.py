@@ -49,6 +49,22 @@ class DatasetBuilderTests(unittest.TestCase):
         self.assertEqual(source.target_query, "")
         self.assertTrue(source.metadata["requires_external_target_query"])
 
+    def test_normalize_xor_record_accepts_classlabel_language_id(self) -> None:
+        record = {
+            "id": "ko-1",
+            "lang": 4,
+            "question": "파이썬은 누가 만들었나요?",
+            "answers": "Guido van Rossum",
+            "split": "train",
+        }
+
+        source = normalize_source_record(record, source="xor_tydi")
+
+        self.assertIsNotNone(source)
+        assert source is not None
+        self.assertEqual(source.question_ko, "파이썬은 누가 만들었나요?")
+        self.assertEqual(source.answers, ("Guido van Rossum",))
+
     def test_doc_contains_answer_normalizes_case_and_punctuation(self) -> None:
         doc = CorpusDocument(
             doc_id="doc-python",

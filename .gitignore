@@ -8,6 +8,7 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv311/
 venv/
 env/
 
@@ -34,6 +35,7 @@ wandb/
 data/*.jsonl
 !data/smoke_dataset.jsonl
 !data/smoke_corpus.jsonl
+!data/mkqa_ko_train_30k.jsonl
 
 # OS/editor files
 .DS_Store
