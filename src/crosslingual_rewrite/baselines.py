@@ -12,7 +12,7 @@ from __future__ import annotations
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 from .config import ExperimentConfig
 from .data import CorpusDocument, RetrievedDocument, RewriteExample
@@ -119,6 +119,7 @@ def run_method(
     checkpoint_dir: str | Path | None = None,
     top_k_override: int | None = None,
     limit: int | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> MethodRunResult:
     """Run one method end-to-end and return a :class:`MethodRunResult`.
 
@@ -165,7 +166,8 @@ def run_method(
             example_count=len(examples),
         )
 
-    for ex, query in zip(examples, queries):
+    total_examples = len(examples)
+    for index, (ex, query) in enumerate(zip(examples, queries), start=1):
         if not query or not query.strip():
             outcomes.append(
                 ExampleOutcome(
@@ -177,6 +179,8 @@ def run_method(
                 )
             )
             error_count += 1
+            if on_progress is not None:
+                on_progress(index, total_examples)
             continue
         try:
             retrieved = retriever.retrieve(
@@ -210,6 +214,8 @@ def run_method(
                 )
             )
             error_count += 1
+        if on_progress is not None:
+            on_progress(index, total_examples)
 
     aggregated = aggregate_metrics(metrics_accumulator)
     return MethodRunResult(

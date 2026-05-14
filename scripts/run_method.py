@@ -61,6 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Limit the number of examples processed (useful for quick checks).",
     )
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=100,
+        help="Print progress every N examples. Use 0 to disable progress output.",
+    )
     return parser
 
 
@@ -73,6 +79,19 @@ def main(argv: list[str] | None = None) -> int:
 
     examples = load_dataset(cfg.data.dataset_path)
     corpus = load_corpus(cfg.data.corpus_path)
+    example_count = len(examples) if args.limit is None or args.limit < 0 else min(len(examples), args.limit)
+
+    print(
+        f"[{args.method}] loaded examples={example_count} corpus={len(corpus)} top_k={args.top_k or cfg.retriever.top_k}",
+        flush=True,
+    )
+
+    def report_progress(done: int, total: int) -> None:
+        if args.progress_every <= 0:
+            return
+        if done == 1 or done == total or done % args.progress_every == 0:
+            pct = 100.0 * done / max(1, total)
+            print(f"[{args.method}] progress {done}/{total} ({pct:.1f}%)", flush=True)
 
     run_id = generate_run_id(cfg, args.method)
     run_result = run_method(
@@ -83,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         checkpoint_dir=args.checkpoint,
         top_k_override=args.top_k,
         limit=args.limit,
+        on_progress=report_progress,
     )
     artifacts = write_run(cfg, run_id=run_id, run_result=run_result)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
@@ -24,6 +25,12 @@ from crosslingual_rewrite.training import train_retrieval_aware  # noqa: E402
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train the retrieval-aware rewriter.")
     parser.add_argument("--config", required=True, help="Path to a YAML config file.")
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=50,
+        help="Print progress every N training steps. Use 0 to disable progress output.",
+    )
     return parser
 
 
@@ -35,7 +42,29 @@ def main(argv: list[str] | None = None) -> int:
     validate_config(cfg)
     examples = load_dataset(cfg.data.dataset_path)
     corpus = load_corpus(cfg.data.corpus_path)
-    result = train_retrieval_aware(cfg, examples, corpus)
+    steps_per_epoch = math.ceil(len(examples) / cfg.training.batch_size)
+    total_expected_steps = steps_per_epoch * cfg.training.epochs
+    print(
+        f"[train_retrieval_aware] loaded examples={len(examples)} corpus={len(corpus)} "
+        f"epochs={cfg.training.epochs} batch_size={cfg.training.batch_size} "
+        f"expected_steps={total_expected_steps}",
+        flush=True,
+    )
+
+    def report_progress(event) -> None:
+        if args.progress_every <= 0:
+            return
+        if event.step == 1 or event.step == total_expected_steps or event.step % args.progress_every == 0:
+            pct = 100.0 * event.step / max(1, total_expected_steps)
+            print(
+                f"[train_retrieval_aware] progress step={event.step}/{total_expected_steps} "
+                f"epoch={event.epoch}/{cfg.training.epochs} ({pct:.1f}%) "
+                f"gen_loss={event.gen_loss:.4f} retrieval_loss={event.retrieval_loss:.4f} "
+                f"total_loss={event.total_loss:.4f}",
+                flush=True,
+            )
+
+    result = train_retrieval_aware(cfg, examples, corpus, on_log=report_progress)
 
     print(
         f"[train_retrieval_aware] mode={result.mode} epochs={result.epochs} "
