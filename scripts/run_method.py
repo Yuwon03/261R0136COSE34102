@@ -67,6 +67,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=100,
         help="Print progress every N examples. Use 0 to disable progress output.",
     )
+    parser.add_argument(
+        "--generation-batch-size",
+        type=int,
+        default=None,
+        help=(
+            "Batch size for model.generate in supervised / retrieval_aware runs. "
+            "Defaults to training.batch_size from the config."
+        ),
+    )
     return parser
 
 
@@ -103,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         top_k_override=args.top_k,
         limit=args.limit,
         on_progress=report_progress,
+        generation_batch_size=args.generation_batch_size,
     )
     artifacts = write_run(cfg, run_id=run_id, run_result=run_result)
 

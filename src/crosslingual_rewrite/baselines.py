@@ -120,6 +120,7 @@ def run_method(
     top_k_override: int | None = None,
     limit: int | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    generation_batch_size: int | None = None,
 ) -> MethodRunResult:
     """Run one method end-to-end and return a :class:`MethodRunResult`.
 
@@ -143,31 +144,78 @@ def run_method(
     metrics_accumulator: list[dict[str, float]] = []
     error_count = 0
 
-    try:
-        queries = generate_queries(method, examples, model=model)
-    except Exception as exc:  # noqa: BLE001 - surface to per-example error
-        detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-        for ex in examples:
+    queries: list[str | None] = [None] * len(examples)
+    generation_errors: dict[int, str] = {}
+
+    if method in {"raw", "translate"}:
+        try:
+            generated = generate_queries(method, examples, model=model)
+        except Exception as exc:  # noqa: BLE001 - surface to per-example error
+            detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+            for ex in examples:
+                outcomes.append(
+                    ExampleOutcome(
+                        example=ex,
+                        query="",
+                        retrieved=[],
+                        metrics=None,
+                        error=f"generate_queries_failed: {detail}",
+                    )
+                )
+                error_count += 1
+            return MethodRunResult(
+                method=method,
+                outcomes=outcomes,
+                aggregated=aggregate_metrics([]),
+                error_count=error_count,
+                example_count=len(examples),
+            )
+        queries = list(generated)
+    else:
+        batch_size = (
+            int(generation_batch_size)
+            if generation_batch_size is not None
+            else int(cfg.training.batch_size)
+        )
+        if batch_size <= 0:
+            raise MethodError("generation_batch_size must be positive")
+        for start in range(0, len(examples), batch_size):
+            batch = list(examples[start : start + batch_size])
+            try:
+                generated = generate_queries(method, batch, model=model)
+            except Exception as exc:  # noqa: BLE001 - keep remaining batches running
+                detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+                for offset in range(len(batch)):
+                    generation_errors[start + offset] = f"generate_queries_failed: {detail}"
+                continue
+            if len(generated) != len(batch):
+                detail = (
+                    f"MethodError: Model returned {len(generated)} queries "
+                    f"for {len(batch)} examples"
+                )
+                for offset in range(len(batch)):
+                    generation_errors[start + offset] = f"generate_queries_failed: {detail}"
+                continue
+            for offset, query in enumerate(generated):
+                queries[start + offset] = query
+
+    total_examples = len(examples)
+    for index, (ex, query) in enumerate(zip(examples, queries), start=1):
+        generation_error = generation_errors.get(index - 1)
+        if generation_error is not None:
             outcomes.append(
                 ExampleOutcome(
                     example=ex,
                     query="",
                     retrieved=[],
                     metrics=None,
-                    error=f"generate_queries_failed: {detail}",
+                    error=generation_error,
                 )
             )
             error_count += 1
-        return MethodRunResult(
-            method=method,
-            outcomes=outcomes,
-            aggregated=aggregate_metrics([]),
-            error_count=error_count,
-            example_count=len(examples),
-        )
-
-    total_examples = len(examples)
-    for index, (ex, query) in enumerate(zip(examples, queries), start=1):
+            if on_progress is not None:
+                on_progress(index, total_examples)
+            continue
         if not query or not query.strip():
             outcomes.append(
                 ExampleOutcome(
