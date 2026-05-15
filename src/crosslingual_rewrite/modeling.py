@@ -246,6 +246,9 @@ class HFRewriteModel(RewriteModel):
     def save(self, output_dir: str | Path) -> None:
         dest = Path(output_dir)
         dest.mkdir(parents=True, exist_ok=True)
+        stale_mock_checkpoint = dest / "checkpoint.json"
+        if stale_mock_checkpoint.exists():
+            stale_mock_checkpoint.unlink()
         self._model.save_pretrained(dest)
         self._tokenizer.save_pretrained(dest)
         metadata = {
@@ -300,10 +303,10 @@ def build_rewrite_model(
         ckpt_path = Path(checkpoint_dir)
         mock_file = ckpt_path / "checkpoint.json"
         hf_meta = ckpt_path / "rewrite_metadata.json"
-        if mock_file.exists():
-            return MockRewriteModel.load(ckpt_path)
         if hf_meta.exists():
             return HFRewriteModel.load(ckpt_path)
+        if mock_file.exists():
+            return MockRewriteModel.load(ckpt_path)
         if use_mock:
             return MockRewriteModel(variant="fresh", metadata={"reason": "missing_checkpoint"})
         raise ModelLoadError(

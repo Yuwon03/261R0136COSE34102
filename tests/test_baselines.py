@@ -27,7 +27,7 @@ from crosslingual_rewrite.data import (  # noqa: E402
     load_corpus,
     load_dataset,
 )
-from crosslingual_rewrite.modeling import MockRewriteModel  # noqa: E402
+from crosslingual_rewrite.modeling import MockRewriteModel, build_rewrite_model  # noqa: E402
 from crosslingual_rewrite.training import train_retrieval_aware, train_supervised  # noqa: E402
 
 
@@ -220,6 +220,39 @@ class RunMethodTests(unittest.TestCase):
                 corpus=_toy_corpus(),
             )
             self.assertEqual(result.error_count, len(broken))
+
+    def test_hf_checkpoint_metadata_takes_precedence_over_stale_mock_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(Path(tmp))
+            ckpt = Path(tmp) / "checkpoint"
+            ckpt.mkdir()
+            (ckpt / "checkpoint.json").write_text(
+                '{"model_type": "mock", "variant": "stale"}',
+                encoding="utf-8",
+            )
+            (ckpt / "rewrite_metadata.json").write_text(
+                '{"model_type": "huggingface", "base_model": "unused"}',
+                encoding="utf-8",
+            )
+
+            import crosslingual_rewrite.modeling as modeling
+
+            calls: list[Path] = []
+            original_load = modeling.HFRewriteModel.load
+
+            def fake_load(path):
+                calls.append(Path(path))
+                return MockRewriteModel(variant="hf-load-sentinel")
+
+            try:
+                modeling.HFRewriteModel.load = fake_load
+                model = build_rewrite_model(cfg, checkpoint_dir=ckpt)
+            finally:
+                modeling.HFRewriteModel.load = original_load
+
+            self.assertEqual(calls, [ckpt])
+            self.assertIsInstance(model, MockRewriteModel)
+            self.assertEqual(model.variant, "hf-load-sentinel")
 
 
 if __name__ == "__main__":
