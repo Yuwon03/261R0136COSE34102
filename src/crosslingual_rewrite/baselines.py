@@ -17,7 +17,7 @@ from typing import Callable, Sequence
 from .config import ExperimentConfig
 from .data import CorpusDocument, RetrievedDocument, RewriteExample
 from .evaluation import MetricBundle, aggregate_metrics, compute_metrics
-from .modeling import RewriteModel, build_rewrite_model
+from .modeling import GenerationRequest, RewriteModel, build_rewrite_model
 from .retriever import BM25Retriever
 
 
@@ -62,6 +62,7 @@ def generate_queries(
     examples: Sequence[RewriteExample],
     *,
     model: RewriteModel | None = None,
+    generation_request: GenerationRequest | None = None,
 ) -> list[str]:
     """Return one retrieval query per example for the requested method.
 
@@ -81,7 +82,7 @@ def generate_queries(
         return queries
     if model is None:
         raise MethodError(f"Method {method!r} requires a loaded model")
-    generated = model.generate(examples)
+    generated = model.generate(examples, request=generation_request)
     if len(generated) != len(examples):
         raise MethodError(
             f"Model returned {len(generated)} queries for {len(examples)} examples"
@@ -121,6 +122,7 @@ def run_method(
     limit: int | None = None,
     on_progress: Callable[[int, int], None] | None = None,
     generation_batch_size: int | None = None,
+    num_beams: int | None = None,
 ) -> MethodRunResult:
     """Run one method end-to-end and return a :class:`MethodRunResult`.
 
@@ -172,6 +174,10 @@ def run_method(
             )
         queries = list(generated)
     else:
+        generation_request = GenerationRequest(
+            max_output_length=int(cfg.model.max_output_length),
+            num_beams=max(1, int(num_beams)) if num_beams is not None else 1,
+        )
         batch_size = (
             int(generation_batch_size)
             if generation_batch_size is not None
@@ -182,7 +188,12 @@ def run_method(
         for start in range(0, len(examples), batch_size):
             batch = list(examples[start : start + batch_size])
             try:
-                generated = generate_queries(method, batch, model=model)
+                generated = generate_queries(
+                    method,
+                    batch,
+                    model=model,
+                    generation_request=generation_request,
+                )
             except Exception as exc:  # noqa: BLE001 - keep remaining batches running
                 detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
                 for offset in range(len(batch)):

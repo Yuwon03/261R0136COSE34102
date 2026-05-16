@@ -76,6 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Defaults to training.batch_size from the config."
         ),
     )
+    parser.add_argument(
+        "--num-beams",
+        type=int,
+        default=1,
+        help="Beam count for model.generate in supervised / retrieval_aware runs.",
+    )
     return parser
 
 
@@ -113,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         limit=args.limit,
         on_progress=report_progress,
         generation_batch_size=args.generation_batch_size,
+        num_beams=args.num_beams,
     )
     artifacts = write_run(cfg, run_id=run_id, run_result=run_result)
 
