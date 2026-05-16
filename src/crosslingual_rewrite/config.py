@@ -68,8 +68,11 @@ class ModelSection:
 class TrainingSection:
     epochs: int = 1
     batch_size: int = 2
+    gradient_accumulation_steps: int = 1
     learning_rate: float = 2e-4
     retrieval_loss_weight: float = 0.5
+    fp16: bool = False
+    gradient_checkpointing: bool = False
     output_dir: str = "output/checkpoints"
 
 
@@ -230,6 +233,8 @@ def validate_config(cfg: ExperimentConfig, *, require_paths_exist: bool = True) 
         raise ConfigError("training.epochs must be a positive integer")
     if cfg.training.batch_size <= 0:
         raise ConfigError("training.batch_size must be a positive integer")
+    if cfg.training.gradient_accumulation_steps <= 0:
+        raise ConfigError("training.gradient_accumulation_steps must be a positive integer")
 
     if require_paths_exist:
         dataset_path = Path(cfg.data.dataset_path)

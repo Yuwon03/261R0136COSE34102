@@ -43,9 +43,12 @@ def main(argv: list[str] | None = None) -> int:
     examples = load_dataset(cfg.data.dataset_path)
     steps_per_epoch = math.ceil(len(examples) / cfg.training.batch_size)
     total_expected_steps = steps_per_epoch * cfg.training.epochs
+    effective_batch_size = cfg.training.batch_size * cfg.training.gradient_accumulation_steps
     print(
         f"[train_supervised] loaded examples={len(examples)} epochs={cfg.training.epochs} "
-        f"batch_size={cfg.training.batch_size} expected_steps={total_expected_steps}",
+        f"batch_size={cfg.training.batch_size} "
+        f"gradient_accumulation_steps={cfg.training.gradient_accumulation_steps} "
+        f"effective_batch_size={effective_batch_size} expected_steps={total_expected_steps}",
         flush=True,
     )
 

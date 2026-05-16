@@ -287,26 +287,54 @@ def _real_train_supervised(
     _ensure_target_queries(examples)
     model = build_rewrite_model(cfg, prefer_mock=False)
     assert isinstance(model, HFRewriteModel)
+
+    if cfg.training.gradient_checkpointing and hasattr(model.model, "gradient_checkpointing_enable"):
+        model.model.gradient_checkpointing_enable()
+        if hasattr(model.model, "config") and hasattr(model.model.config, "use_cache"):
+            model.model.config.use_cache = False
+
     optimizer = AdamW(model.model.parameters(), lr=cfg.training.learning_rate)
+    gradient_accumulation_steps = max(1, int(cfg.training.gradient_accumulation_steps))
+    use_fp16 = bool(cfg.training.fp16) and torch.cuda.is_available()
+    scaler = torch.cuda.amp.GradScaler(enabled=use_fp16)
     log_path = _training_log_path(cfg, "supervised")
     log_path.write_text("", encoding="utf-8")
 
     model.model.train()
     total_steps = 0
     final_gen = 0.0
+    optimizer.zero_grad()
+    batches_per_epoch = math.ceil(len(examples) / cfg.training.batch_size)
+    total_expected_steps = cfg.training.epochs * batches_per_epoch
     for epoch in range(1, cfg.training.epochs + 1):
         for batch in _iter_batches(examples, cfg.training.batch_size):
             inputs = model.encode(ex.question_ko for ex in batch)
             labels = model.encode_targets(ex.target_query or "" for ex in batch)
             label_ids = labels["input_ids"].clone()
             label_ids[label_ids == model.tokenizer.pad_token_id] = -100
-            output = model.model(**inputs, labels=label_ids)
-            loss = output.loss
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            with torch.cuda.amp.autocast(enabled=use_fp16):
+                output = model.model(**inputs, labels=label_ids)
+                raw_loss = output.loss
+                loss = raw_loss / gradient_accumulation_steps
+            if use_fp16:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
             total_steps += 1
-            gen_value = float(loss.detach().cpu().item())
+
+            should_step = (
+                total_steps % gradient_accumulation_steps == 0
+                or total_steps == total_expected_steps
+            )
+            if should_step:
+                if use_fp16:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
+                optimizer.zero_grad()
+
+            gen_value = float(raw_loss.detach().cpu().item())
             final_gen = gen_value
             event = TrainingLogEvent(
                 epoch=epoch,
@@ -318,7 +346,13 @@ def _real_train_supervised(
                 objective="supervised",
                 event="batch",
                 timestamp=_timestamp(),
-                extras={"mode": "real"},
+                extras={
+                    "mode": "real",
+                    "gradient_accumulation_steps": gradient_accumulation_steps,
+                    "optimizer_step": should_step,
+                    "fp16": use_fp16,
+                    "gradient_checkpointing": bool(cfg.training.gradient_checkpointing),
+                },
             )
             _append_log(log_path, event, on_log)
 
