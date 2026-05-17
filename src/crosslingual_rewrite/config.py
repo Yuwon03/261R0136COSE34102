@@ -62,6 +62,13 @@ class ModelSection:
     max_input_length: int = 256
     max_output_length: int = 64
     use_mock_model_for_smoke: bool = True
+    src_lang: str | None = None
+    tgt_lang: str | None = None
+    lora_enabled: bool = False
+    lora_r: int = 16
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
+    lora_target_modules: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -236,6 +243,12 @@ def validate_config(cfg: ExperimentConfig, *, require_paths_exist: bool = True) 
         raise ConfigError("training.batch_size must be a positive integer")
     if cfg.training.gradient_accumulation_steps <= 0:
         raise ConfigError("training.gradient_accumulation_steps must be a positive integer")
+    if cfg.model.lora_r <= 0:
+        raise ConfigError("model.lora_r must be a positive integer")
+    if cfg.model.lora_alpha <= 0:
+        raise ConfigError("model.lora_alpha must be a positive integer")
+    if not 0.0 <= cfg.model.lora_dropout < 1.0:
+        raise ConfigError("model.lora_dropout must be in [0.0, 1.0)")
 
     if require_paths_exist:
         dataset_path = Path(cfg.data.dataset_path)

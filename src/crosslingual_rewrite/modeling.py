@@ -61,7 +61,7 @@ class RewriteModel(ABC):
         """Return one generated query per example."""
 
     @abstractmethod
-    def save(self, output_dir: str | Path) -> None:
+    def save(self, output_dir: str | Path, *, merge_lora: bool = False) -> None:
         """Persist the model to ``output_dir``."""
 
     @classmethod
@@ -126,7 +126,8 @@ class MockRewriteModel(RewriteModel):
                 outputs.append(_deterministic_fallback_query(example.question_ko))
         return outputs
 
-    def save(self, output_dir: str | Path) -> None:
+    def save(self, output_dir: str | Path, *, merge_lora: bool = False) -> None:
+        _ = merge_lora
         dest = Path(output_dir)
         dest.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -173,6 +174,14 @@ class HFRewriteModel(RewriteModel):
         *,
         max_input_length: int = 256,
         max_output_length: int = 64,
+        src_lang: str | None = None,
+        tgt_lang: str | None = None,
+        lora_enabled: bool = False,
+        lora_r: int = 16,
+        lora_alpha: int = 32,
+        lora_dropout: float = 0.05,
+        lora_target_modules: Sequence[str] | None = None,
+        adapter_dir: str | Path | None = None,
         device: str | None = None,
     ) -> None:
         import torch  # local import so tests can skip it
@@ -181,9 +190,38 @@ class HFRewriteModel(RewriteModel):
         self.base_model = base_model
         self.max_input_length = int(max_input_length)
         self.max_output_length = int(max_output_length)
+        self.src_lang = src_lang
+        self.tgt_lang = tgt_lang
+        self.lora_enabled = bool(lora_enabled or adapter_dir is not None)
+        self.lora_r = int(lora_r)
+        self.lora_alpha = int(lora_alpha)
+        self.lora_dropout = float(lora_dropout)
+        self.lora_target_modules = list(lora_target_modules or [])
 
-        self._tokenizer = AutoTokenizer.from_pretrained(base_model)
+        tokenizer_kwargs: dict[str, Any] = {}
+        if src_lang:
+            tokenizer_kwargs["src_lang"] = src_lang
+        if tgt_lang:
+            tokenizer_kwargs["tgt_lang"] = tgt_lang
+        self._tokenizer = AutoTokenizer.from_pretrained(base_model, **tokenizer_kwargs)
+        self._set_tokenizer_languages()
         self._model = AutoModelForSeq2SeqLM.from_pretrained(base_model)
+        if adapter_dir is not None:
+            from peft import PeftModel
+
+            self._model = PeftModel.from_pretrained(self._model, str(adapter_dir))
+        elif lora_enabled:
+            from peft import LoraConfig, TaskType, get_peft_model
+
+            lora_kwargs: dict[str, Any] = {
+                "task_type": TaskType.SEQ_2_SEQ_LM,
+                "r": self.lora_r,
+                "lora_alpha": self.lora_alpha,
+                "lora_dropout": self.lora_dropout,
+            }
+            if self.lora_target_modules:
+                lora_kwargs["target_modules"] = self.lora_target_modules
+            self._model = get_peft_model(self._model, LoraConfig(**lora_kwargs))
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self._device = device
@@ -201,9 +239,32 @@ class HFRewriteModel(RewriteModel):
     def device(self) -> str:
         return self._device
 
+    def _set_tokenizer_languages(self) -> None:
+        if self.src_lang and hasattr(self._tokenizer, "src_lang"):
+            self._tokenizer.src_lang = self.src_lang
+        if self.tgt_lang and hasattr(self._tokenizer, "tgt_lang"):
+            self._tokenizer.tgt_lang = self.tgt_lang
+
+    def _target_bos_token_id(self) -> int | None:
+        if not self.tgt_lang:
+            return None
+        lang_code_to_id = getattr(self._tokenizer, "lang_code_to_id", None)
+        if isinstance(lang_code_to_id, Mapping):
+            token_id = lang_code_to_id.get(self.tgt_lang)
+            if token_id is not None:
+                return int(token_id)
+        token_id = self._tokenizer.convert_tokens_to_ids(self.tgt_lang)
+        if token_id is None:
+            return None
+        unk = getattr(self._tokenizer, "unk_token_id", None)
+        if unk is not None and int(token_id) == int(unk):
+            return None
+        return int(token_id)
+
     def encode(self, texts: Iterable[str]):  # type: ignore[no-untyped-def]
         """Tokenize a batch of texts for generation or training."""
 
+        self._set_tokenizer_languages()
         return self._tokenizer(
             list(texts),
             padding=True,
@@ -215,13 +276,20 @@ class HFRewriteModel(RewriteModel):
     def encode_targets(self, texts: Iterable[str]):  # type: ignore[no-untyped-def]
         """Tokenize target queries for teacher-forcing training."""
 
-        return self._tokenizer(
-            list(texts),
-            padding=True,
-            truncation=True,
-            max_length=self.max_output_length,
-            return_tensors="pt",
-        ).to(self._device)
+        self._set_tokenizer_languages()
+        text_list = list(texts)
+        kwargs = {
+            "padding": True,
+            "truncation": True,
+            "max_length": self.max_output_length,
+            "return_tensors": "pt",
+        }
+        if self.tgt_lang:
+            try:
+                return self._tokenizer(text_target=text_list, **kwargs).to(self._device)
+            except TypeError:
+                pass
+        return self._tokenizer(text_list, **kwargs).to(self._device)
 
     def generate(
         self,
@@ -233,22 +301,39 @@ class HFRewriteModel(RewriteModel):
             return []
         req = request or GenerationRequest(max_output_length=self.max_output_length)
         inputs = self.encode(example.question_ko for example in examples)
+        generation_kwargs: dict[str, Any] = {}
+        target_bos = self._target_bos_token_id()
+        if target_bos is not None:
+            generation_kwargs["forced_bos_token_id"] = target_bos
         output_ids = self._model.generate(
             **inputs,
             max_length=req.max_output_length,
             num_beams=max(1, int(req.num_beams)),
+            **generation_kwargs,
         )
         decoded: list[str] = self._tokenizer.batch_decode(
             output_ids, skip_special_tokens=True
         )
         return [text.strip() for text in decoded]
 
-    def save(self, output_dir: str | Path) -> None:
+    def save(self, output_dir: str | Path, *, merge_lora: bool = False) -> None:
         dest = Path(output_dir)
         dest.mkdir(parents=True, exist_ok=True)
         stale_mock_checkpoint = dest / "checkpoint.json"
         if stale_mock_checkpoint.exists():
             stale_mock_checkpoint.unlink()
+        if self.lora_enabled and merge_lora and hasattr(self._model, "merge_and_unload"):
+            for filename in ("adapter_config.json", "adapter_model.safetensors", "adapter_model.bin"):
+                path = dest / filename
+                if path.exists():
+                    path.unlink()
+            self._model = self._model.merge_and_unload()
+            self.lora_enabled = False
+        elif self.lora_enabled:
+            for filename in ("model.safetensors", "pytorch_model.bin"):
+                path = dest / filename
+                if path.exists():
+                    path.unlink()
         self._model.save_pretrained(dest)
         self._tokenizer.save_pretrained(dest)
         metadata = {
@@ -256,6 +341,14 @@ class HFRewriteModel(RewriteModel):
             "base_model": self.base_model,
             "max_input_length": self.max_input_length,
             "max_output_length": self.max_output_length,
+            "src_lang": self.src_lang,
+            "tgt_lang": self.tgt_lang,
+            "lora_enabled": self.lora_enabled,
+            "lora_r": self.lora_r,
+            "lora_alpha": self.lora_alpha,
+            "lora_dropout": self.lora_dropout,
+            "lora_target_modules": self.lora_target_modules,
+            "lora_merged": bool(merge_lora and not self.lora_enabled),
         }
         (dest / "rewrite_metadata.json").write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True),
@@ -270,10 +363,22 @@ class HFRewriteModel(RewriteModel):
                 f"Missing HuggingFace metadata at {meta_path}. Train the model first."
             )
         metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        checkpoint_path = Path(checkpoint_dir)
+        adapter_path = checkpoint_path / "adapter_config.json"
+        is_adapter_checkpoint = bool(metadata.get("lora_enabled")) and adapter_path.exists()
+        base_model = str(metadata.get("base_model") or checkpoint_path)
         return cls(
-            base_model=str(checkpoint_dir),
+            base_model=base_model if is_adapter_checkpoint else str(checkpoint_path),
             max_input_length=int(metadata.get("max_input_length", 256)),
             max_output_length=int(metadata.get("max_output_length", 64)),
+            src_lang=metadata.get("src_lang"),
+            tgt_lang=metadata.get("tgt_lang"),
+            lora_enabled=False,
+            lora_r=int(metadata.get("lora_r", 16)),
+            lora_alpha=int(metadata.get("lora_alpha", 32)),
+            lora_dropout=float(metadata.get("lora_dropout", 0.05)),
+            lora_target_modules=metadata.get("lora_target_modules") or [],
+            adapter_dir=checkpoint_path if is_adapter_checkpoint else None,
         )
 
 
@@ -320,6 +425,13 @@ def build_rewrite_model(
         base_model=cfg.model.base_model,
         max_input_length=cfg.model.max_input_length,
         max_output_length=cfg.model.max_output_length,
+        src_lang=cfg.model.src_lang,
+        tgt_lang=cfg.model.tgt_lang,
+        lora_enabled=cfg.model.lora_enabled,
+        lora_r=cfg.model.lora_r,
+        lora_alpha=cfg.model.lora_alpha,
+        lora_dropout=cfg.model.lora_dropout,
+        lora_target_modules=cfg.model.lora_target_modules,
     )
 
 

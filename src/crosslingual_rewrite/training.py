@@ -293,7 +293,8 @@ def _real_train_supervised(
         if hasattr(model.model, "config") and hasattr(model.model.config, "use_cache"):
             model.model.config.use_cache = False
 
-    optimizer = AdamW(model.model.parameters(), lr=cfg.training.learning_rate)
+    trainable_params = [param for param in model.model.parameters() if param.requires_grad]
+    optimizer = AdamW(trainable_params, lr=cfg.training.learning_rate)
     gradient_accumulation_steps = max(1, int(cfg.training.gradient_accumulation_steps))
     use_fp16 = bool(cfg.training.fp16) and torch.cuda.is_available()
     scaler = torch.cuda.amp.GradScaler(enabled=use_fp16)
@@ -358,7 +359,7 @@ def _real_train_supervised(
             _append_log(log_path, event, on_log)
 
         if cfg.training.save_each_epoch:
-            model.save(ckpt_dir)
+            model.save(ckpt_dir, merge_lora=False)
             state_path = ckpt_dir / "training_state.json"
             state_path.write_text(
                 json.dumps(
@@ -374,7 +375,7 @@ def _real_train_supervised(
                 encoding="utf-8",
             )
 
-    model.save(ckpt_dir)
+    model.save(ckpt_dir, merge_lora=bool(cfg.model.lora_enabled))
     return TrainingResult(
         objective="supervised",
         checkpoint_dir=str(ckpt_dir),
@@ -402,7 +403,8 @@ def _real_train_retrieval_aware(
     retriever = BM25Retriever(corpus)
     model = build_rewrite_model(cfg, prefer_mock=False)
     assert isinstance(model, HFRewriteModel)
-    optimizer = AdamW(model.model.parameters(), lr=cfg.training.learning_rate)
+    trainable_params = [param for param in model.model.parameters() if param.requires_grad]
+    optimizer = AdamW(trainable_params, lr=cfg.training.learning_rate)
     weight = float(cfg.training.retrieval_loss_weight)
     log_path = _training_log_path(cfg, "retrieval_aware")
     log_path.write_text("", encoding="utf-8")
@@ -464,7 +466,7 @@ def _real_train_retrieval_aware(
             _append_log(log_path, event, on_log)
 
     ckpt_dir = _checkpoint_dir(cfg, "retrieval_aware")
-    model.save(ckpt_dir)
+    model.save(ckpt_dir, merge_lora=bool(cfg.model.lora_enabled))
     return TrainingResult(
         objective="retrieval_aware",
         checkpoint_dir=str(ckpt_dir),

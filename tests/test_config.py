@@ -37,6 +37,13 @@ def _minimal_config_dict(tmp_path: Path) -> dict:
             "max_input_length": 128,
             "max_output_length": 32,
             "use_mock_model_for_smoke": True,
+            "src_lang": "kor_Hang",
+            "tgt_lang": "eng_Latn",
+            "lora_enabled": True,
+            "lora_r": 8,
+            "lora_alpha": 16,
+            "lora_dropout": 0.1,
+            "lora_target_modules": ["q_proj", "v_proj"],
         },
         "training": {
             "epochs": 1,
@@ -70,6 +77,10 @@ class ConfigLoadingTests(unittest.TestCase):
             self.assertTrue(cfg.training.gradient_checkpointing)
             self.assertTrue(cfg.training.save_each_epoch)
             self.assertTrue(cfg.model.use_mock_model_for_smoke)
+            self.assertEqual(cfg.model.src_lang, "kor_Hang")
+            self.assertEqual(cfg.model.tgt_lang, "eng_Latn")
+            self.assertTrue(cfg.model.lora_enabled)
+            self.assertEqual(cfg.model.lora_target_modules, ["q_proj", "v_proj"])
 
     def test_parse_config_missing_section_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
