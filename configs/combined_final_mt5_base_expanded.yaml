@@ -1,0 +1,44 @@
+experiment:
+  name: combined-final-mt5-base-expanded
+  task_type: training
+  seed: 13
+
+data:
+  dataset_path: data/combined_ko_train_expanded.jsonl
+  corpus_path: data/wiki_en_corpus_300k.jsonl
+  split: train
+
+model:
+  base_model: output/checkpoints_mt5_base_continued/supervised
+  checkpoint_dir: output/checkpoints_mt5_base_expanded/supervised
+  max_input_length: 256
+  max_output_length: 96
+  use_mock_model_for_smoke: false
+
+training:
+  epochs: 2
+  batch_size: 1
+  gradient_accumulation_steps: 4
+  learning_rate: 0.00003
+  retrieval_loss_weight: 0.5
+  fp16: false
+  gradient_checkpointing: true
+  output_dir: output/checkpoints_mt5_base_expanded
+
+retriever:
+  backend: bm25
+  top_k: 10
+
+evaluation:
+  top_k: 10
+  metrics:
+    - recall_at_k
+    - mrr
+    - ndcg
+    - source_diversity
+    - source_language_ratio
+    - faithfulness
+
+output:
+  runs_dir: output/final_runs
+  analysis_dir: output/final_analysis_mt5_base_expanded
