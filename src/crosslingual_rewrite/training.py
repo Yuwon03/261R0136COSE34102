@@ -299,6 +299,7 @@ def _real_train_supervised(
     scaler = torch.cuda.amp.GradScaler(enabled=use_fp16)
     log_path = _training_log_path(cfg, "supervised")
     log_path.write_text("", encoding="utf-8")
+    ckpt_dir = _checkpoint_dir(cfg, "supervised")
 
     model.model.train()
     total_steps = 0
@@ -356,7 +357,23 @@ def _real_train_supervised(
             )
             _append_log(log_path, event, on_log)
 
-    ckpt_dir = _checkpoint_dir(cfg, "supervised")
+        if cfg.training.save_each_epoch:
+            model.save(ckpt_dir)
+            state_path = ckpt_dir / "training_state.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "epoch": epoch,
+                        "total_steps": total_steps,
+                        "final_gen_loss": final_gen,
+                        "timestamp": _timestamp(),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+
     model.save(ckpt_dir)
     return TrainingResult(
         objective="supervised",

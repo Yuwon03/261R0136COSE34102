@@ -73,6 +73,7 @@ class TrainingSection:
     retrieval_loss_weight: float = 0.5
     fp16: bool = False
     gradient_checkpointing: bool = False
+    save_each_epoch: bool = False
     output_dir: str = "output/checkpoints"
 
 

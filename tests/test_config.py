@@ -46,6 +46,7 @@ def _minimal_config_dict(tmp_path: Path) -> dict:
             "retrieval_loss_weight": 0.25,
             "fp16": False,
             "gradient_checkpointing": True,
+            "save_each_epoch": True,
             "output_dir": str(tmp_path / "ckpt_root"),
         },
         "retriever": {"backend": "bm25", "top_k": 5},
@@ -67,6 +68,7 @@ class ConfigLoadingTests(unittest.TestCase):
             self.assertEqual(cfg.training.retrieval_loss_weight, 0.25)
             self.assertEqual(cfg.training.gradient_accumulation_steps, 2)
             self.assertTrue(cfg.training.gradient_checkpointing)
+            self.assertTrue(cfg.training.save_each_epoch)
             self.assertTrue(cfg.model.use_mock_model_for_smoke)
 
     def test_parse_config_missing_section_raises(self) -> None:
