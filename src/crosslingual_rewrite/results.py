@@ -14,7 +14,7 @@ The per-example schema:
 
    {
      "run_id": "string",
-     "method": "raw|translate|supervised|retrieval_aware",
+     "method": "raw|machine_translate|translate|supervised|retrieval_aware",
      "example_id": "string",
      "question_ko": "string",
      "query": "string",

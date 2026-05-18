@@ -1,10 +1,9 @@
 """Per-method query generation and one shared runner.
 
-Each of the four methods (``raw``, ``translate``, ``supervised``,
-``retrieval_aware``) ultimately boils down to picking or generating a single
-retrieval query per example. The runner :func:`run_method` wires together
-config parsing, model loading, retrieval, and evaluation so every method
-produces artifacts in the same shape.
+Each method ultimately boils down to picking or generating a single retrieval
+query per example. The runner :func:`run_method` wires together config parsing,
+model loading, retrieval, and evaluation so every method produces artifacts in
+the same shape.
 """
 
 from __future__ import annotations
@@ -17,11 +16,17 @@ from typing import Callable, Sequence
 from .config import ExperimentConfig
 from .data import CorpusDocument, RetrievedDocument, RewriteExample
 from .evaluation import MetricBundle, aggregate_metrics, compute_metrics
-from .modeling import GenerationRequest, RewriteModel, build_rewrite_model
+from .modeling import GenerationRequest, HFRewriteModel, RewriteModel, build_rewrite_model
 from .retriever import BM25Retriever
 
 
-VALID_METHODS: tuple[str, ...] = ("raw", "translate", "supervised", "retrieval_aware")
+VALID_METHODS: tuple[str, ...] = (
+    "raw",
+    "machine_translate",
+    "translate",
+    "supervised",
+    "retrieval_aware",
+)
 
 
 class MethodError(RuntimeError):
@@ -67,8 +72,11 @@ def generate_queries(
     """Return one retrieval query per example for the requested method.
 
     * ``raw``: returns ``example.question_ko``.
-    * ``translate``: returns ``example.target_query``. Missing target queries
-      raise a clear error.
+    * ``machine_translate``: runs the configured base model as a zero-shot
+      translator without loading any supervised checkpoint or LoRA adapter.
+    * ``translate``: returns ``example.target_query``. This is a gold-query
+      upper bound, not an automatic translation baseline. Missing target
+      queries raise a clear error.
     * ``supervised`` and ``retrieval_aware``: delegate to ``model.generate``.
     """
 
@@ -107,6 +115,17 @@ def _load_model_for(
 ) -> RewriteModel | None:
     if method in {"raw", "translate"}:
         return None
+    if method == "machine_translate":
+        if cfg.model.use_mock_model_for_smoke:
+            return build_rewrite_model(cfg, prefer_mock=True)
+        return HFRewriteModel(
+            base_model=cfg.model.base_model,
+            max_input_length=cfg.model.max_input_length,
+            max_output_length=cfg.model.max_output_length,
+            src_lang=cfg.model.src_lang,
+            tgt_lang=cfg.model.tgt_lang,
+            lora_enabled=False,
+        )
     checkpoint = _resolve_checkpoint(cfg, method, override)
     return build_rewrite_model(cfg, checkpoint_dir=checkpoint)
 

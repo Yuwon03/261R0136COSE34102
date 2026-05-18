@@ -34,9 +34,10 @@ class RewriteExample:
 
     Required fields: ``question_ko``, ``positive_doc_id``, ``negative_doc_id``.
 
-    ``target_query`` is required for supervised training and the translate
-    baseline. It may be ``None`` for raw-only inference settings. Downstream
-    code that needs it should check and raise explicitly.
+    ``target_query`` is required for supervised training and the gold-query
+    upper-bound baseline. It may be ``None`` for raw-only or automatic
+    translation inference settings. Downstream code that needs it should
+    check and raise explicitly.
     """
 
     question_ko: str

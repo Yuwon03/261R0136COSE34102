@@ -37,7 +37,7 @@ _REQUIRED_SECTIONS: tuple[str, ...] = (
 )
 
 _VALID_METHODS: frozenset[str] = frozenset(
-    {"raw", "translate", "supervised", "retrieval_aware"}
+    {"raw", "machine_translate", "translate", "supervised", "retrieval_aware"}
 )
 
 

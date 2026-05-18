@@ -84,6 +84,11 @@ class QueryGenerationTests(unittest.TestCase):
         queries = generate_queries("translate", _toy_examples())
         self.assertEqual(queries[0], "python dataclass generated methods")
 
+    def test_machine_translate_delegates_to_model(self) -> None:
+        model = MockRewriteModel(variant="translation-smoke")
+        queries = generate_queries("machine_translate", _toy_examples(), model=model)
+        self.assertEqual(queries[0], "python dataclass generated methods")
+
     def test_translate_raises_when_target_missing(self) -> None:
         broken = [
             RewriteExample(
@@ -152,6 +157,19 @@ class RunMethodTests(unittest.TestCase):
             self.assertEqual(result.error_count, 0)
             self.assertAlmostEqual(result.aggregated["recall_at_k"], 1.0, places=6)
             self.assertAlmostEqual(result.aggregated["mrr"], 1.0, places=6)
+
+    def test_machine_translate_uses_model_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(Path(tmp))
+            result = run_method(
+                cfg,
+                "machine_translate",
+                examples=_toy_examples(),
+                corpus=_toy_corpus(),
+            )
+            self.assertEqual(result.error_count, 0)
+            self.assertEqual(result.method, "machine_translate")
+            self.assertAlmostEqual(result.aggregated["recall_at_k"], 1.0, places=6)
 
     def test_supervised_with_mock_uses_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
