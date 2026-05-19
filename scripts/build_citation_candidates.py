@@ -1,0 +1,196 @@
+"""Build citation-seeking search-plan candidates for full retrieval runs."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+def _ensure_src_on_path() -> None:
+    project_root = Path(__file__).resolve().parent.parent
+    src_path = project_root / "src"
+    if src_path.exists() and str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+
+
+_ensure_src_on_path()
+
+from crosslingual_rewrite.citation import (  # noqa: E402
+    CitationCandidateRecord,
+    answers_from_metadata,
+    compact_query_tokens,
+    make_search_plan,
+)
+from crosslingual_rewrite.config import load_config, validate_config  # noqa: E402
+from crosslingual_rewrite.data import RewriteExample, load_dataset  # noqa: E402
+from crosslingual_rewrite.modeling import GenerationRequest, HFRewriteModel  # noqa: E402
+
+
+def _machine_translate(
+    examples: list[RewriteExample],
+    *,
+    base_model: str,
+    src_lang: str | None,
+    tgt_lang: str | None,
+    batch_size: int,
+    max_output_length: int,
+    num_beams: int,
+) -> dict[str, str]:
+    model = HFRewriteModel(
+        base_model=base_model,
+        max_input_length=256,
+        max_output_length=max_output_length,
+        src_lang=src_lang,
+        tgt_lang=tgt_lang,
+        lora_enabled=False,
+    )
+    request = GenerationRequest(max_output_length=max_output_length, num_beams=num_beams)
+    outputs: dict[str, str] = {}
+    for start in range(0, len(examples), batch_size):
+        batch = examples[start : start + batch_size]
+        generated = model.generate(batch, request=request)
+        for example, query in zip(batch, generated):
+            outputs[example.example_id or str(start)] = query
+    return outputs
+
+
+def _records_for_example(
+    example: RewriteExample,
+    *,
+    machine_translation: str | None,
+    methods: set[str],
+) -> list[CitationCandidateRecord]:
+    answers = answers_from_metadata(example.metadata or {})
+    base_query = machine_translation or example.target_query or example.question_ko
+    compact_answers = compact_query_tokens(" ".join(answers), max_tokens=12)
+    candidates: list[tuple[str, list[str], dict]] = []
+
+    if "raw" in methods:
+        candidates.append(("raw", [example.question_ko], {}))
+    if "machine_translate" in methods and machine_translation:
+        candidates.append(("machine_translate", [machine_translation], {"translation_model": "base_model"}))
+    if "gold_target" in methods and example.target_query:
+        candidates.append(("gold_target", [example.target_query], {"upper_bound": True}))
+    if "entity_expand" in methods:
+        expanded = compact_query_tokens(base_query, compact_answers, max_tokens=40)
+        queries = [query for query in [expanded, base_query, example.question_ko] if query]
+        candidates.append(("entity_expand", queries, {}))
+    if "hyde" in methods:
+        hyde = " ".join(
+            part
+            for part in [
+                "Evidence document about",
+                base_query,
+                compact_answers,
+                "background facts chronology definition official source",
+            ]
+            if part
+        )
+        candidates.append(("hyde", [hyde, base_query], {}))
+    if "query2doc" in methods:
+        query2doc = " ".join(
+            part
+            for part in [
+                base_query,
+                "answer evidence citation source",
+                compact_answers,
+            ]
+            if part
+        )
+        candidates.append(("query2doc", [query2doc, base_query], {}))
+    if "multilingual_plan" in methods:
+        queries = [query for query in [base_query, example.question_ko, compact_answers] if query]
+        candidates.append(("multilingual_plan", queries, {"preferred_source_languages": ["en", "ko"]}))
+
+    rows: list[CitationCandidateRecord] = []
+    question_id = example.example_id or example.question_ko[:40]
+    for method, queries, metadata in candidates:
+        plan = make_search_plan(
+            method=method,
+            question=example.question_ko,
+            queries=queries,
+            target_query=example.target_query,
+            answers=answers,
+            metadata=metadata,
+        )
+        rows.append(
+            CitationCandidateRecord(
+                question_id=question_id,
+                question=example.question_ko,
+                query_type=example.query_type,
+                candidate_id=f"{question_id}:{method}",
+                search_plan=plan,
+                positive_doc_id=example.positive_doc_id,
+                negative_doc_id=example.negative_doc_id,
+                target_query=example.target_query,
+                answers=answers,
+                metadata={
+                    "dataset_name": example.dataset_name,
+                    "split_name": example.split_name,
+                    "source_language": example.source_language,
+                },
+            )
+        )
+    return rows
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Build citation-aware candidate search plans.")
+    parser.add_argument("--config", required=True, help="Experiment config with dataset/model paths.")
+    parser.add_argument("--output", required=True, help="Output candidate JSONL.")
+    parser.add_argument(
+        "--methods",
+        default="raw,machine_translate,entity_expand,hyde,query2doc,multilingual_plan,gold_target",
+        help="Comma-separated candidate methods.",
+    )
+    parser.add_argument("--limit", type=int, default=None, help="Optional full-run limit.")
+    parser.add_argument("--translation-batch-size", type=int, default=4)
+    parser.add_argument("--num-beams", type=int, default=4)
+    parser.add_argument("--max-output-length", type=int, default=96)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    cfg = load_config(args.config)
+    validate_config(cfg)
+    examples = load_dataset(cfg.data.dataset_path)
+    if args.limit is not None and args.limit >= 0:
+        examples = examples[: args.limit]
+    methods = {method.strip() for method in args.methods.split(",") if method.strip()}
+    translations: dict[str, str] = {}
+    if "machine_translate" in methods:
+        translations = _machine_translate(
+            examples,
+            base_model=cfg.model.base_model,
+            src_lang=cfg.model.src_lang,
+            tgt_lang=cfg.model.tgt_lang,
+            batch_size=args.translation_batch_size,
+            max_output_length=args.max_output_length,
+            num_beams=args.num_beams,
+        )
+
+    rows = []
+    for example in examples:
+        rows.extend(
+            record.to_dict()
+            for record in _records_for_example(
+                example,
+                machine_translation=translations.get(example.example_id or ""),
+                methods=methods,
+            )
+        )
+
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as out:
+        for row in rows:
+            out.write(json.dumps(row, ensure_ascii=False) + "\n")
+    print(json.dumps({"output": str(output_path), "questions": len(examples), "candidates": len(rows)}, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

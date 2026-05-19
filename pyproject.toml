@@ -27,12 +27,18 @@ dependencies = [
     "sentencepiece>=0.1.99",
     "protobuf>=4.25",
     "sacremoses>=0.1.1",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "scikit-learn>=1.3",
+    "sentence-transformers>=2.7",
+    "faiss-cpu>=1.8",
 ]
 
 [project.optional-dependencies]
 peft = [
     "peft>=0.4",
     "accelerate>=0.20",
+    "bitsandbytes>=0.43",
 ]
 dev = [
     "pytest>=7.0",
