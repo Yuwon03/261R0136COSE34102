@@ -37,7 +37,13 @@ def _machine_translate(
     batch_size: int,
     max_output_length: int,
     num_beams: int,
+    progress_every: int,
 ) -> dict[str, str]:
+    print(
+        f"[candidates] loading translation model={base_model} examples={len(examples)} "
+        f"batch_size={batch_size} num_beams={num_beams}",
+        flush=True,
+    )
     model = HFRewriteModel(
         base_model=base_model,
         max_input_length=256,
@@ -53,6 +59,10 @@ def _machine_translate(
         generated = model.generate(batch, request=request)
         for example, query in zip(batch, generated):
             outputs[example.example_id or str(start)] = query
+        done = min(start + len(batch), len(examples))
+        if progress_every > 0 and (done == len(examples) or done == len(batch) or done % progress_every == 0):
+            pct = 100.0 * done / max(1, len(examples))
+            print(f"[candidates] translated {done}/{len(examples)} ({pct:.1f}%)", flush=True)
     return outputs
 
 
@@ -149,6 +159,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--translation-batch-size", type=int, default=4)
     parser.add_argument("--num-beams", type=int, default=4)
     parser.add_argument("--max-output-length", type=int, default=96)
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=100,
+        help="Print progress every N questions. Use 0 to disable progress output.",
+    )
     return parser
 
 
@@ -160,6 +176,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit is not None and args.limit >= 0:
         examples = examples[: args.limit]
     methods = {method.strip() for method in args.methods.split(",") if method.strip()}
+    print(
+        f"[candidates] loaded examples={len(examples)} methods={','.join(sorted(methods))}",
+        flush=True,
+    )
     translations: dict[str, str] = {}
     if "machine_translate" in methods:
         translations = _machine_translate(
@@ -170,25 +190,32 @@ def main(argv: list[str] | None = None) -> int:
             batch_size=args.translation_batch_size,
             max_output_length=args.max_output_length,
             num_beams=args.num_beams,
-        )
-
-    rows = []
-    for example in examples:
-        rows.extend(
-            record.to_dict()
-            for record in _records_for_example(
-                example,
-                machine_translation=translations.get(example.example_id or ""),
-                methods=methods,
-            )
+            progress_every=args.progress_every,
         )
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
     with output_path.open("w", encoding="utf-8") as out:
-        for row in rows:
-            out.write(json.dumps(row, ensure_ascii=False) + "\n")
-    print(json.dumps({"output": str(output_path), "questions": len(examples), "candidates": len(rows)}, indent=2))
+        for index, example in enumerate(examples, start=1):
+            records = _records_for_example(
+                example,
+                machine_translation=translations.get(example.example_id or ""),
+                methods=methods,
+            )
+            for record in records:
+                out.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+                written += 1
+            if args.progress_every > 0 and (
+                index == 1 or index == len(examples) or index % args.progress_every == 0
+            ):
+                pct = 100.0 * index / max(1, len(examples))
+                print(
+                    f"[candidates] wrote questions={index}/{len(examples)} ({pct:.1f}%) "
+                    f"candidates={written}",
+                    flush=True,
+                )
+    print(json.dumps({"output": str(output_path), "questions": len(examples), "candidates": written}, indent=2))
     return 0
 
 

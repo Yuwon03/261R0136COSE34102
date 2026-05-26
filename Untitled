@@ -1,0 +1,6 @@
+python3 - <<'PY'
+from pathlib import Path
+p = Path.home() / ".cache/huggingface/hub/models--google--mt5-small"
+print(p)
+print("exists:", p.exists())
+PY

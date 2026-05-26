@@ -28,12 +28,38 @@ from crosslingual_rewrite.data import load_corpus  # noqa: E402
 from crosslingual_rewrite.retriever import BM25Retriever  # noqa: E402
 
 
+def _record_key(record: CitationCandidateRecord) -> str:
+    return f"{record.question_id}\t{record.candidate_id}"
+
+
 def _iter_records(path: Path):
     with path.open("r", encoding="utf-8") as fh:
         for line in fh:
             stripped = line.strip()
             if stripped:
                 yield CitationCandidateRecord.from_dict(json.loads(stripped))
+
+
+def _load_completed_keys(path: Path) -> tuple[set[str], int, int]:
+    completed: set[str] = set()
+    valid_rows = 0
+    invalid_rows = 0
+    if not path.exists():
+        return completed, valid_rows, invalid_rows
+
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                record = CitationCandidateRecord.from_dict(json.loads(stripped))
+            except (json.JSONDecodeError, TypeError, ValueError):
+                invalid_rows += 1
+                continue
+            completed.add(_record_key(record))
+            valid_rows += 1
+    return completed, valid_rows, invalid_rows
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,10 +75,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dense-model", default="BAAI/bge-m3")
     parser.add_argument("--reranker-model", default="BAAI/bge-reranker-v2-m3")
     parser.add_argument("--embedding-cache-dir", default="/opt/dlami/nvme/citation_index")
-    parser.add_argument("--dense-batch-size", type=int, default=64)
-    parser.add_argument("--reranker-batch-size", type=int, default=16)
+    parser.add_argument("--dense-batch-size", type=int, default=16)
+    parser.add_argument("--dense-max-seq-length", type=int, default=256)
+    parser.add_argument("--reranker-batch-size", type=int, default=8)
+    parser.add_argument("--reranker-max-length", type=int, default=512)
     parser.add_argument("--no-dense", action="store_true")
     parser.add_argument("--no-reranker", action="store_true")
+    parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--progress-every", type=int, default=100)
     return parser
 
@@ -74,15 +103,48 @@ def main(argv: list[str] | None = None) -> int:
             model_name=args.dense_model,
             cache_dir=args.embedding_cache_dir,
             batch_size=args.dense_batch_size,
+            max_seq_length=args.dense_max_seq_length,
         )
     reranker = None
     if not args.no_reranker:
-        reranker = CrossEncoderReranker(model_name=args.reranker_model, batch_size=args.reranker_batch_size)
+        reranker = CrossEncoderReranker(
+            model_name=args.reranker_model,
+            batch_size=args.reranker_batch_size,
+            max_length=args.reranker_max_length,
+        )
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as out:
+
+    completed_keys: set[str] = set()
+    completed_rows = 0
+    invalid_rows = 0
+    if args.resume:
+        completed_keys, completed_rows, invalid_rows = _load_completed_keys(output_path)
+        if completed_rows or invalid_rows:
+            print(
+                "[citation_retrieval] resume "
+                f"completed={completed_rows} invalid_rows={invalid_rows} remaining="
+                f"{max(0, len(records) - len(completed_keys))}",
+                flush=True,
+            )
+
+    mode = "a" if args.resume else "w"
+    processed = 0
+    skipped = 0
+    with output_path.open(mode, encoding="utf-8") as out:
         for index, record in enumerate(records, start=1):
+            key = _record_key(record)
+            if key in completed_keys:
+                skipped += 1
+                if args.progress_every > 0 and (index == 1 or index == len(records) or index % args.progress_every == 0):
+                    pct = 100.0 * index / max(1, len(records))
+                    print(
+                        f"[citation_retrieval] progress {index}/{len(records)} ({pct:.1f}%) "
+                        f"skipped={skipped} processed={processed}",
+                        flush=True,
+                    )
+                continue
             citations = retrieve_citations_for_plan(
                 record.search_plan,
                 corpus=corpus,
@@ -108,10 +170,28 @@ def main(argv: list[str] | None = None) -> int:
                 metadata=record.metadata,
             )
             out.write(json.dumps(retrieved.to_dict(), ensure_ascii=False) + "\n")
+            out.flush()
+            completed_keys.add(key)
+            processed += 1
             if args.progress_every > 0 and (index == 1 or index == len(records) or index % args.progress_every == 0):
                 pct = 100.0 * index / max(1, len(records))
-                print(f"[citation_retrieval] progress {index}/{len(records)} ({pct:.1f}%)", flush=True)
-    print(json.dumps({"output": str(output_path), "records": len(records)}, indent=2))
+                print(
+                    f"[citation_retrieval] progress {index}/{len(records)} ({pct:.1f}%) "
+                    f"skipped={skipped} processed={processed}",
+                    flush=True,
+                )
+    print(
+        json.dumps(
+            {
+                "output": str(output_path),
+                "records": len(records),
+                "skipped": skipped,
+                "processed": processed,
+                "resume": bool(args.resume),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
@@ -53,15 +55,21 @@ class DenseRetriever:
         *,
         model_name: str = "BAAI/bge-m3",
         cache_dir: str | Path | None = None,
-        batch_size: int = 64,
+        batch_size: int = 16,
+        max_seq_length: int = 256,
     ) -> None:
         import numpy as np
         from sentence_transformers import SentenceTransformer
 
+        os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+        if sys.platform == "darwin":
+            os.environ.setdefault("PYTORCH_SDP_DISABLE_FLASH_ATTENTION", "1")
+            os.environ.setdefault("PYTORCH_SDP_DISABLE_MEM_EFFICIENT_ATTENTION", "1")
         self._np = np
         self._docs = list(documents)
         self._model_name = model_name
         self._model = SentenceTransformer(model_name)
+        self._model.max_seq_length = int(max_seq_length)
         self._batch_size = batch_size
         self._doc_ids = [doc.doc_id for doc in self._docs]
         cache_path = None
@@ -104,10 +112,16 @@ class DenseRetriever:
 class CrossEncoderReranker:
     """CrossEncoder reranker wrapper."""
 
-    def __init__(self, *, model_name: str = "BAAI/bge-reranker-v2-m3", batch_size: int = 16) -> None:
+    def __init__(
+        self,
+        *,
+        model_name: str = "BAAI/bge-reranker-v2-m3",
+        batch_size: int = 16,
+        max_length: int = 512,
+    ) -> None:
         from sentence_transformers import CrossEncoder
 
-        self._model = CrossEncoder(model_name)
+        self._model = CrossEncoder(model_name, max_length=max_length)
         self._batch_size = batch_size
 
     def rerank(
