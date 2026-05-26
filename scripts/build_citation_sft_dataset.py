@@ -18,9 +18,6 @@ def _ensure_src_on_path() -> None:
 
 _ensure_src_on_path()
 
-from crosslingual_rewrite.citation import CitationCandidateRecord  # noqa: E402
-
-
 SYSTEM_PROMPT = (
     "You are a citation-seeking search planner. Given a Korean or mixed-language "
     "question, output compact JSON with queries, entities, aliases, answer_type, "
@@ -29,8 +26,8 @@ SYSTEM_PROMPT = (
 )
 
 
-def _plan_json(record: CitationCandidateRecord) -> str:
-    return json.dumps(record.search_plan.to_dict(), ensure_ascii=False, sort_keys=True)
+def _plan_json(record: dict) -> str:
+    return json.dumps(record["search_plan"], ensure_ascii=False, sort_keys=True)
 
 
 def _prompt(question: str) -> str:
@@ -48,18 +45,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    grouped: dict[str, list[CitationCandidateRecord]] = defaultdict(list)
+    grouped: dict[str, list[dict]] = defaultdict(list)
     with Path(args.input).open("r", encoding="utf-8") as fh:
         for line in fh:
             if not line.strip():
                 continue
-            record = CitationCandidateRecord.from_dict(json.loads(line))
-            grouped[record.question_id].append(record)
+            row = json.loads(line)
+            grouped[str(row.get("question_id") or "")].append(
+                {
+                    "question_id": str(row.get("question_id") or ""),
+                    "question": str(row.get("question") or ""),
+                    "candidate_id": str(row.get("candidate_id") or ""),
+                    "search_plan": dict(row.get("search_plan") or {}),
+                    "candidate_score": float(row.get("candidate_score") or 0.0),
+                }
+            )
 
     sft_rows = []
     preference_rows = []
     for question_id, records in grouped.items():
-        ordered = sorted(records, key=lambda row: (-row.candidate_score, row.candidate_id))
+        ordered = sorted(records, key=lambda row: (-row["candidate_score"], row["candidate_id"]))
         if not ordered:
             continue
         chosen = ordered[0]
@@ -68,29 +73,29 @@ def main(argv: list[str] | None = None) -> int:
                 "question_id": question_id,
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": chosen.question},
+                    {"role": "user", "content": chosen["question"]},
                     {"role": "assistant", "content": _plan_json(chosen)},
                 ],
-                "candidate_score": chosen.candidate_score,
-                "method": chosen.search_plan.method,
+                "candidate_score": chosen["candidate_score"],
+                "method": str(chosen["search_plan"].get("method") or "unknown"),
             }
         )
         rejected = None
         for candidate in reversed(ordered):
-            if chosen.candidate_score - candidate.candidate_score >= args.min_score_margin:
+            if chosen["candidate_score"] - candidate["candidate_score"] >= args.min_score_margin:
                 rejected = candidate
                 break
         if rejected is not None:
             preference_rows.append(
                 {
                     "question_id": question_id,
-                    "prompt": _prompt(chosen.question),
+                    "prompt": _prompt(chosen["question"]),
                     "chosen": _plan_json(chosen),
                     "rejected": _plan_json(rejected),
-                    "chosen_score": chosen.candidate_score,
-                    "rejected_score": rejected.candidate_score,
-                    "chosen_method": chosen.search_plan.method,
-                    "rejected_method": rejected.search_plan.method,
+                    "chosen_score": chosen["candidate_score"],
+                    "rejected_score": rejected["candidate_score"],
+                    "chosen_method": str(chosen["search_plan"].get("method") or "unknown"),
+                    "rejected_method": str(rejected["search_plan"].get("method") or "unknown"),
                 }
             )
 

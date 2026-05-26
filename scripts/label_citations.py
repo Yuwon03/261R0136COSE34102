@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
 
 from textwrap import shorten
@@ -44,6 +45,19 @@ def _existing_keys(path: Path) -> set[tuple[str, str]]:
             row = json.loads(line)
             keys.add((str(row.get("candidate_id")), str(row.get("chunk_id") or row.get("doc_id"))))
     return keys
+
+
+def _existing_method_counts(path: Path) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    if not path.exists():
+        return counts
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            counts[str(row.get("method") or "unknown")] += 1
+    return counts
 
 
 def _iter_citations(path: Path):
@@ -92,12 +106,34 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-items", type=int, default=None)
     parser.add_argument("--show-chars", type=int, default=1400)
     parser.add_argument("--batch-size", type=int, default=1, help="Number of citations to label per prompt.")
+    parser.add_argument("--balanced", action="store_true", help="Stop labeling methods that reached --per-method.")
+    parser.add_argument("--per-method", type=int, default=None, help="Target total labels per method.")
     return parser
 
 
-def _run_single_labeling(args: argparse.Namespace, seen: set[tuple[str, str]], out) -> int:
+def _method(record: dict) -> str:
+    return str((record.get("search_plan") or {}).get("method") or "unknown")
+
+
+def _method_complete(args: argparse.Namespace, method_counts: Counter[str], method: str) -> bool:
+    return bool(args.balanced and args.per_method is not None and method_counts[method] >= args.per_method)
+
+
+def _all_methods_complete(args: argparse.Namespace, method_counts: Counter[str]) -> bool:
+    if not args.balanced or args.per_method is None:
+        return False
+    methods = ("raw", "machine_translate", "gold_target", "entity_expand", "hyde", "query2doc", "multilingual_plan")
+    return all(method_counts[method] >= args.per_method for method in methods)
+
+
+def _run_single_labeling(args: argparse.Namespace, seen: set[tuple[str, str]], method_counts: Counter[str], out) -> int:
     labeled = 0
     for record, citation in _iter_citations(Path(args.input)):
+        if _all_methods_complete(args, method_counts):
+            break
+        method = _method(record)
+        if _method_complete(args, method_counts, method):
+            continue
         key = (str(record.get("candidate_id")), str(citation.get("chunk_id") or citation.get("doc_id")))
         if key in seen:
             continue
@@ -118,13 +154,14 @@ def _run_single_labeling(args: argparse.Namespace, seen: set[tuple[str, str]], o
         out.write(json.dumps(_label_payload(record, citation, label), ensure_ascii=False) + "\n")
         out.flush()
         seen.add(key)
+        method_counts[method] += 1
         labeled += 1
         if args.max_items is not None and labeled >= args.max_items:
             break
     return labeled
 
 
-def _run_batch_labeling(args: argparse.Namespace, seen: set[tuple[str, str]], out) -> int:
+def _run_batch_labeling(args: argparse.Namespace, seen: set[tuple[str, str]], method_counts: Counter[str], out) -> int:
     labeled = 0
     batch_size = max(1, int(args.batch_size))
     pending: list[tuple[dict, dict, tuple[str, str]]] = []
@@ -157,13 +194,19 @@ def _run_batch_labeling(args: argparse.Namespace, seen: set[tuple[str, str]], ou
                 continue
             out.write(json.dumps(_label_payload(record, citation, label), ensure_ascii=False) + "\n")
             seen.add(key)
+            method_counts[_method(record)] += 1
             labeled += 1
         out.flush()
         pending = []
-        return args.max_items is None or labeled < args.max_items
+        return (args.max_items is None or labeled < args.max_items) and not _all_methods_complete(args, method_counts)
 
     current_candidate_id = None
     for record, citation in _iter_citations(Path(args.input)):
+        if _all_methods_complete(args, method_counts):
+            break
+        method = _method(record)
+        if _method_complete(args, method_counts, method):
+            continue
         key = (str(record.get("candidate_id")), str(citation.get("chunk_id") or citation.get("doc_id")))
         if key in seen:
             continue
@@ -187,14 +230,28 @@ def main(argv: list[str] | None = None) -> int:
     output_path = Path(args.labels_output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     seen = _existing_keys(output_path)
+    method_counts = _existing_method_counts(output_path)
 
     print("Labels: [g] supported/good, [p] partial, [b] unsupported/bad, [c] contradicted, [s] skip, [q] quit")
+    if args.balanced and args.per_method is not None:
+        print("Current labels by method:")
+        for method in ("raw", "machine_translate", "gold_target", "entity_expand", "hyde", "query2doc", "multilingual_plan"):
+            print(f"  {method}: {method_counts[method]}/{args.per_method}")
     with output_path.open("a", encoding="utf-8") as out:
         if args.batch_size <= 1:
-            labeled = _run_single_labeling(args, seen, out)
+            labeled = _run_single_labeling(args, seen, method_counts, out)
         else:
-            labeled = _run_batch_labeling(args, seen, out)
-    print(json.dumps({"labels_output": str(output_path), "new_labels": labeled}, indent=2))
+            labeled = _run_batch_labeling(args, seen, method_counts, out)
+    print(
+        json.dumps(
+            {
+                "labels_output": str(output_path),
+                "new_labels": labeled,
+                "method_counts": dict(sorted(method_counts.items())),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 

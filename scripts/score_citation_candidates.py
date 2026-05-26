@@ -21,13 +21,12 @@ _ensure_src_on_path()
 from crosslingual_rewrite.citation import (  # noqa: E402
     CitationCandidate,
     CitationCandidateRecord,
-    aggregate_metric_dicts,
     normalize_support_label,
     score_candidate_record,
 )
 
 
-def _load_labels(path: str | None) -> dict[tuple[str, str], str]:
+def _load_label_file(path: str | None) -> dict[tuple[str, str], str]:
     if not path:
         return {}
     labels_path = Path(path)
@@ -41,6 +40,12 @@ def _load_labels(path: str | None) -> dict[tuple[str, str], str]:
             row = json.loads(line)
             key = (str(row.get("candidate_id")), str(row.get("chunk_id") or row.get("doc_id")))
             labels[key] = normalize_support_label(str(row.get("label") or "unlabeled"))
+    return labels
+
+
+def _load_labels(human_path: str | None, ai_path: str | None) -> dict[tuple[str, str], str]:
+    labels = _load_label_file(ai_path)
+    labels.update(_load_label_file(human_path))
     return labels
 
 
@@ -92,50 +97,56 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", required=True, help="Scored candidate JSONL.")
     parser.add_argument("--summary-output", required=True, help="Method summary CSV.")
     parser.add_argument("--labels", default=None, help="Optional human label JSONL.")
+    parser.add_argument("--ai-labels", default=None, help="Optional AI label JSONL. Human labels override AI labels.")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    labels = _load_labels(args.labels)
-    scored_rows: list[CitationCandidateRecord] = []
-    with Path(args.input).open("r", encoding="utf-8") as fh:
-        for line in fh:
-            if not line.strip():
-                continue
-            record = CitationCandidateRecord.from_dict(json.loads(line))
-            scored_rows.append(score_candidate_record(_apply_labels(record, labels)))
+    labels = _load_labels(args.labels, args.ai_labels)
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as out:
-        for record in scored_rows:
-            out.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+    by_method_count: dict[str, int] = {}
+    scores_by_method: dict[str, float] = {}
+    metric_sums_by_method: dict[str, dict[str, float]] = {}
+    metric_names: set[str] = set()
+    total_records = 0
 
-    by_method: dict[str, list[dict[str, float]]] = {}
-    scores_by_method: dict[str, list[float]] = {}
-    for record in scored_rows:
-        method = record.search_plan.method
-        by_method.setdefault(method, []).append(record.metrics)
-        scores_by_method.setdefault(method, []).append(record.candidate_score)
+    with output_path.open("w", encoding="utf-8") as out:
+        with Path(args.input).open("r", encoding="utf-8") as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                record = CitationCandidateRecord.from_dict(json.loads(line))
+                record = score_candidate_record(_apply_labels(record, labels))
+                method = record.search_plan.method
+                by_method_count[method] = by_method_count.get(method, 0) + 1
+                scores_by_method[method] = scores_by_method.get(method, 0.0) + record.candidate_score
+                metric_sums = metric_sums_by_method.setdefault(method, {})
+                for name, value in record.metrics.items():
+                    metric_names.add(name)
+                    metric_sums[name] = metric_sums.get(name, 0.0) + float(value)
+                total_records += 1
+                out.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+
     summary_path = Path(args.summary_output)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    metric_names = sorted({key for metrics in by_method.values() for row in metrics for key in row})
     with summary_path.open("w", encoding="utf-8", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=["method", "candidate_count", "candidate_score", *metric_names])
+        writer = csv.DictWriter(fh, fieldnames=["method", "candidate_count", "candidate_score", *sorted(metric_names)])
         writer.writeheader()
-        for method in sorted(by_method):
-            aggregated = aggregate_metric_dicts(by_method[method])
-            scores = scores_by_method[method]
+        for method in sorted(by_method_count):
+            count = by_method_count[method]
+            metric_sums = metric_sums_by_method.get(method, {})
             writer.writerow(
                 {
                     "method": method,
-                    "candidate_count": len(by_method[method]),
-                    "candidate_score": sum(scores) / max(1, len(scores)),
-                    **{name: aggregated.get(name, 0.0) for name in metric_names},
+                    "candidate_count": count,
+                    "candidate_score": scores_by_method.get(method, 0.0) / max(1, count),
+                    **{name: metric_sums.get(name, 0.0) / max(1, count) for name in sorted(metric_names)},
                 }
             )
-    print(json.dumps({"output": str(output_path), "summary_output": str(summary_path), "records": len(scored_rows)}, indent=2))
+    print(json.dumps({"output": str(output_path), "summary_output": str(summary_path), "records": total_records}, indent=2))
     return 0
 
 
