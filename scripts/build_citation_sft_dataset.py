@@ -40,17 +40,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sft-output", required=True)
     parser.add_argument("--preference-output", required=True)
     parser.add_argument("--min-score-margin", type=float, default=0.05)
+    parser.add_argument(
+        "--exclude-method",
+        action="append",
+        default=[],
+        help="Candidate method to exclude from train labels. Can be repeated.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    excluded_methods = {method.strip() for method in args.exclude_method if method.strip()}
     grouped: dict[str, list[dict]] = defaultdict(list)
     with Path(args.input).open("r", encoding="utf-8") as fh:
         for line in fh:
             if not line.strip():
                 continue
             row = json.loads(line)
+            method = str((row.get("search_plan") or {}).get("method") or "unknown")
+            if method in excluded_methods:
+                continue
             grouped[str(row.get("question_id") or "")].append(
                 {
                     "question_id": str(row.get("question_id") or ""),
@@ -104,7 +114,16 @@ def main(argv: list[str] | None = None) -> int:
         with path.open("w", encoding="utf-8") as out:
             for row in rows:
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
-    print(json.dumps({"sft_rows": len(sft_rows), "preference_rows": len(preference_rows)}, indent=2))
+    print(
+        json.dumps(
+            {
+                "sft_rows": len(sft_rows),
+                "preference_rows": len(preference_rows),
+                "excluded_methods": sorted(excluded_methods),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
