@@ -333,6 +333,90 @@ def _dry_run_labels(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return labels
 
 
+def _fallback_label(item: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    return {
+        "id": item["id"],
+        "label": "unsupported",
+        "confidence": 0.0,
+        "reason": reason,
+    }
+
+
+def _judge_items(
+    items: list[dict[str, Any]],
+    *,
+    provider: str,
+    model: str,
+    api_key: str | None,
+    timeout: int,
+    max_retries: int,
+    missing_retries: int,
+) -> list[dict[str, Any]]:
+    if provider == "dry-run":
+        labels = _dry_run_labels(items)
+    elif provider == "gemini":
+        labels = _call_gemini_judge(
+            items,
+            model=model,
+            api_key=str(api_key),
+            timeout=timeout,
+            max_retries=max_retries,
+        )
+    else:
+        labels = _call_openai_judge(
+            items,
+            model=model,
+            api_key=str(api_key),
+            timeout=timeout,
+            max_retries=max_retries,
+        )
+
+    by_id = {str(row.get("id")): row for row in labels}
+    missing = [item for item in items if str(item["id"]) not in by_id]
+    for retry in range(missing_retries):
+        if not missing:
+            break
+        if provider == "dry-run":
+            retry_labels = _dry_run_labels(missing)
+        elif provider == "gemini":
+            retry_labels = _call_gemini_judge(
+                missing,
+                model=model,
+                api_key=str(api_key),
+                timeout=timeout,
+                max_retries=max_retries,
+            )
+        else:
+            retry_labels = _call_openai_judge(
+                missing,
+                model=model,
+                api_key=str(api_key),
+                timeout=timeout,
+                max_retries=max_retries,
+            )
+        by_id.update({str(row.get("id")): row for row in retry_labels})
+        missing = [item for item in missing if str(item["id"]) not in by_id]
+        if missing:
+            print(
+                json.dumps(
+                    {
+                        "missing_label_retry": retry + 1,
+                        "remaining_missing": len(missing),
+                        "sample_missing_id": missing[0]["id"],
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+
+    for item in missing:
+        by_id[str(item["id"])] = _fallback_label(
+            item,
+            reason=f"judge response omitted this item after {missing_retries} missing-label retries; fallback unsupported label",
+        )
+    return [by_id[str(item["id"])] for item in items]
+
+
 def _to_label_row(item: dict[str, Any], judged: dict[str, Any], *, source: str, model: str) -> dict[str, Any]:
     label = str(judged.get("label") or "unsupported")
     if label not in VALID_LABELS:
@@ -370,6 +454,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--confidence-threshold", type=float, default=0.0)
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--max-retries", type=int, default=3)
+    parser.add_argument("--missing-label-retries", type=int, default=2)
     parser.add_argument("--progress-every", type=int, default=10)
     parser.add_argument("--limit-batches", type=int, default=None, help="Debug limit for number of judged batches.")
     return parser
@@ -379,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     _load_dotenv(Path(args.env_file))
     if args.model is None:
-        args.model = "gemini-flash-latest" if args.provider == "gemini" else os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+        args.model = "gemini-3.1-flash-lite" if args.provider == "gemini" else os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
     if args.api_key_env is None:
         args.api_key_env = "OPENAI_API_KEY" if args.provider == "openai" else "GEMINI_API_KEY"
     input_path = Path(args.input)
@@ -430,29 +515,16 @@ def main(argv: list[str] | None = None) -> int:
             batch.append(item)
             if len(batch) < args.batch_size:
                 continue
-            if args.provider == "dry-run":
-                labels = _dry_run_labels(batch)
-            elif args.provider == "gemini":
-                labels = _call_gemini_judge(
-                    batch,
-                    model=args.model,
-                    api_key=str(api_key),
-                    timeout=args.timeout,
-                    max_retries=args.max_retries,
-                )
-            else:
-                labels = _call_openai_judge(
-                    batch,
-                    model=args.model,
-                    api_key=str(api_key),
-                    timeout=args.timeout,
-                    max_retries=args.max_retries,
-                )
-            by_id = {str(row.get("id")): row for row in labels}
-            for judged_item in batch:
-                judged = by_id.get(str(judged_item["id"]))
-                if judged is None:
-                    raise RuntimeError(f"missing label for item id={judged_item['id']}")
+            labels = _judge_items(
+                batch,
+                provider=args.provider,
+                model=args.model,
+                api_key=api_key,
+                timeout=args.timeout,
+                max_retries=args.max_retries,
+                missing_retries=args.missing_label_retries,
+            )
+            for judged_item, judged in zip(batch, labels):
                 if float(judged.get("confidence") or 0.0) < args.confidence_threshold:
                     continue
                 row = _to_label_row(judged_item, judged, source=args.provider, model=args.model)
@@ -481,28 +553,17 @@ def main(argv: list[str] | None = None) -> int:
                 break
 
         if batch and (args.limit_batches is None or batches < args.limit_batches):
-            if args.provider == "dry-run":
-                labels = _dry_run_labels(batch)
-            elif args.provider == "gemini":
-                labels = _call_gemini_judge(
-                    batch,
-                    model=args.model,
-                    api_key=str(api_key),
-                    timeout=args.timeout,
-                    max_retries=args.max_retries,
-                )
-            else:
-                labels = _call_openai_judge(
-                    batch,
-                    model=args.model,
-                    api_key=str(api_key),
-                    timeout=args.timeout,
-                    max_retries=args.max_retries,
-                )
-            by_id = {str(row.get("id")): row for row in labels}
-            for judged_item in batch:
-                judged = by_id.get(str(judged_item["id"]))
-                if judged is None or float(judged.get("confidence") or 0.0) < args.confidence_threshold:
+            labels = _judge_items(
+                batch,
+                provider=args.provider,
+                model=args.model,
+                api_key=api_key,
+                timeout=args.timeout,
+                max_retries=args.max_retries,
+                missing_retries=args.missing_label_retries,
+            )
+            for judged_item, judged in zip(batch, labels):
+                if float(judged.get("confidence") or 0.0) < args.confidence_threshold:
                     continue
                 row = _to_label_row(judged_item, judged, source=args.provider, model=args.model)
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
