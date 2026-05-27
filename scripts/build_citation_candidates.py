@@ -30,6 +30,53 @@ from crosslingual_rewrite.modeling import GenerationRequest, HFRewriteModel  # n
 from crosslingual_rewrite.search_planner import LoRASearchPlanner, PlannerGenerationConfig  # noqa: E402
 
 
+def _candidate_id(example: RewriteExample, method: str) -> str:
+    question_id = example.example_id or example.question_ko[:40]
+    return f"{question_id}:{method}"
+
+
+def _load_completed_candidate_ids(path: Path) -> tuple[set[str], int, int]:
+    completed: set[str] = set()
+    valid_rows = 0
+    invalid_rows = 0
+    if not path.exists():
+        return completed, valid_rows, invalid_rows
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                row = json.loads(stripped)
+            except json.JSONDecodeError:
+                invalid_rows += 1
+                continue
+            candidate_id = str(row.get("candidate_id") or "").strip()
+            if candidate_id:
+                completed.add(candidate_id)
+                valid_rows += 1
+    return completed, valid_rows, invalid_rows
+
+
+def _write_records(
+    out,
+    records: list[CitationCandidateRecord],
+    *,
+    completed_ids: set[str],
+) -> tuple[int, int]:
+    written = 0
+    skipped = 0
+    for record in records:
+        if record.candidate_id in completed_ids:
+            skipped += 1
+            continue
+        out.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+        out.flush()
+        completed_ids.add(record.candidate_id)
+        written += 1
+    return written, skipped
+
+
 def _machine_translate(
     examples: list[RewriteExample],
     *,
@@ -190,6 +237,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--planner-no-4bit", action="store_true")
     parser.add_argument("--planner-no-bf16", action="store_true")
     parser.add_argument(
+        "--resume",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Append to an existing output and skip already written candidate_id rows.",
+    )
+    parser.add_argument(
         "--progress-every",
         type=int,
         default=100,
@@ -210,6 +263,19 @@ def main(argv: list[str] | None = None) -> int:
         f"[candidates] loaded examples={len(examples)} methods={','.join(sorted(methods))}",
         flush=True,
     )
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    completed_ids: set[str] = set()
+    completed_rows = 0
+    invalid_rows = 0
+    if args.resume:
+        completed_ids, completed_rows, invalid_rows = _load_completed_candidate_ids(output_path)
+        if completed_rows or invalid_rows:
+            print(
+                f"[candidates] resume completed={completed_rows} invalid_rows={invalid_rows}",
+                flush=True,
+            )
+
     translations: dict[str, str] = {}
     if "machine_translate" in methods:
         translations = _machine_translate(
@@ -223,7 +289,8 @@ def main(argv: list[str] | None = None) -> int:
             progress_every=args.progress_every,
         )
 
-    planner_plans: dict[str, SearchPlan] = {}
+    written = 0
+    skipped = 0
     if "citation_planner" in methods:
         if not args.planner_base_model or not args.planner_adapter:
             raise SystemExit(
@@ -245,33 +312,70 @@ def main(argv: list[str] | None = None) -> int:
                 bf16=not args.planner_no_bf16,
             ),
         )
-        for start in range(0, len(examples), args.planner_batch_size):
-            batch = examples[start : start + args.planner_batch_size]
-            generated = planner.generate(
-                [example.question_ko for example in batch],
-                batch_size=args.planner_batch_size,
-            )
-            for example, plan in zip(batch, generated):
-                planner_plans[example.example_id or ""] = plan
-            done = min(start + len(batch), len(examples))
-            if args.progress_every > 0 and (done == len(examples) or done == len(batch) or done % args.progress_every == 0):
-                pct = 100.0 * done / max(1, len(examples))
-                print(f"[candidates] planned {done}/{len(examples)} ({pct:.1f}%)", flush=True)
+        mode = "a" if args.resume else "w"
+        with output_path.open(mode, encoding="utf-8") as out:
+            for start in range(0, len(examples), args.planner_batch_size):
+                batch = examples[start : start + args.planner_batch_size]
+                pending = [
+                    example
+                    for example in batch
+                    if _candidate_id(example, "citation_planner") not in completed_ids
+                ]
+                if pending:
+                    generated = planner.generate(
+                        [example.question_ko for example in pending],
+                        batch_size=args.planner_batch_size,
+                    )
+                    for example, plan in zip(pending, generated):
+                        records = _records_for_example(
+                            example,
+                            machine_translation=translations.get(example.example_id or ""),
+                            planner_plan=plan,
+                            methods={"citation_planner"},
+                        )
+                        new_written, _ = _write_records(out, records, completed_ids=completed_ids)
+                        written += new_written
+                done = min(start + len(batch), len(examples))
+                if args.progress_every > 0 and (
+                    done == len(examples) or done == len(batch) or done % args.progress_every == 0
+                ):
+                    pct = 100.0 * done / max(1, len(examples))
+                    print(
+                        f"[candidates] planned {done}/{len(examples)} ({pct:.1f}%) "
+                        f"new_written={written} total_saved={len(completed_ids)}",
+                        flush=True,
+                    )
 
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    written = 0
-    with output_path.open("w", encoding="utf-8") as out:
+    remaining_methods = set(methods)
+    remaining_methods.discard("citation_planner")
+    mode = "a" if args.resume else "w"
+    if not remaining_methods:
+        print(
+            json.dumps(
+                {
+                    "output": str(output_path),
+                    "questions": len(examples),
+                    "candidates": len(completed_ids),
+                    "new_candidates": written,
+                    "skipped_existing": skipped,
+                    "resume": bool(args.resume),
+                },
+                indent=2,
+            )
+        )
+        return 0
+    mode = "a" if args.resume or "citation_planner" in methods else "w"
+    with output_path.open(mode, encoding="utf-8") as out:
         for index, example in enumerate(examples, start=1):
             records = _records_for_example(
                 example,
                 machine_translation=translations.get(example.example_id or ""),
-                planner_plan=planner_plans.get(example.example_id or ""),
-                methods=methods,
+                planner_plan=None,
+                methods=remaining_methods,
             )
-            for record in records:
-                out.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
-                written += 1
+            new_written, new_skipped = _write_records(out, records, completed_ids=completed_ids)
+            written += new_written
+            skipped += new_skipped
             if args.progress_every > 0 and (
                 index == 1 or index == len(examples) or index % args.progress_every == 0
             ):
@@ -281,7 +385,19 @@ def main(argv: list[str] | None = None) -> int:
                     f"candidates={written}",
                     flush=True,
                 )
-    print(json.dumps({"output": str(output_path), "questions": len(examples), "candidates": written}, indent=2))
+    print(
+        json.dumps(
+            {
+                "output": str(output_path),
+                "questions": len(examples),
+                "candidates": len(completed_ids),
+                "new_candidates": written,
+                "skipped_existing": skipped,
+                "resume": bool(args.resume),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
