@@ -243,6 +243,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Append to an existing output and skip already written candidate_id rows.",
     )
     parser.add_argument(
+        "--reverse",
+        action="store_true",
+        help="Process dataset examples from the end to the beginning.",
+    )
+    parser.add_argument(
         "--progress-every",
         type=int,
         default=100,
@@ -256,6 +261,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(args.config)
     validate_config(cfg)
     examples = load_dataset(cfg.data.dataset_path)
+    if args.reverse:
+        examples = list(reversed(examples))
     if args.limit is not None and args.limit >= 0:
         examples = examples[: args.limit]
     methods = {method.strip() for method in args.methods.split(",") if method.strip()}
