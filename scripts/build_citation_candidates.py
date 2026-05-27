@@ -19,6 +19,7 @@ _ensure_src_on_path()
 
 from crosslingual_rewrite.citation import (  # noqa: E402
     CitationCandidateRecord,
+    SearchPlan,
     answers_from_metadata,
     compact_query_tokens,
     make_search_plan,
@@ -26,6 +27,7 @@ from crosslingual_rewrite.citation import (  # noqa: E402
 from crosslingual_rewrite.config import load_config, validate_config  # noqa: E402
 from crosslingual_rewrite.data import RewriteExample, load_dataset  # noqa: E402
 from crosslingual_rewrite.modeling import GenerationRequest, HFRewriteModel  # noqa: E402
+from crosslingual_rewrite.search_planner import LoRASearchPlanner, PlannerGenerationConfig  # noqa: E402
 
 
 def _machine_translate(
@@ -70,6 +72,7 @@ def _records_for_example(
     example: RewriteExample,
     *,
     machine_translation: str | None,
+    planner_plan: SearchPlan | None,
     methods: set[str],
 ) -> list[CitationCandidateRecord]:
     answers = answers_from_metadata(example.metadata or {})
@@ -116,6 +119,25 @@ def _records_for_example(
 
     rows: list[CitationCandidateRecord] = []
     question_id = example.example_id or example.question_ko[:40]
+    if "citation_planner" in methods and planner_plan is not None:
+        rows.append(
+            CitationCandidateRecord(
+                question_id=question_id,
+                question=example.question_ko,
+                query_type=example.query_type,
+                candidate_id=f"{question_id}:citation_planner",
+                search_plan=planner_plan,
+                positive_doc_id=example.positive_doc_id,
+                negative_doc_id=example.negative_doc_id,
+                target_query=example.target_query,
+                answers=answers,
+                metadata={
+                    "dataset_name": example.dataset_name,
+                    "split_name": example.split_name,
+                    "source_language": example.source_language,
+                },
+            )
+        )
     for method, queries, metadata in candidates:
         plan = make_search_plan(
             method=method,
@@ -159,6 +181,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--translation-batch-size", type=int, default=4)
     parser.add_argument("--num-beams", type=int, default=4)
     parser.add_argument("--max-output-length", type=int, default=96)
+    parser.add_argument("--planner-base-model", default=None, help="Base causal LM for citation_planner.")
+    parser.add_argument("--planner-adapter", default=None, help="PEFT adapter path for citation_planner.")
+    parser.add_argument("--planner-batch-size", type=int, default=4)
+    parser.add_argument("--planner-max-new-tokens", type=int, default=192)
+    parser.add_argument("--planner-temperature", type=float, default=0.0)
+    parser.add_argument("--planner-top-p", type=float, default=1.0)
+    parser.add_argument("--planner-no-4bit", action="store_true")
+    parser.add_argument("--planner-no-bf16", action="store_true")
     parser.add_argument(
         "--progress-every",
         type=int,
@@ -193,6 +223,41 @@ def main(argv: list[str] | None = None) -> int:
             progress_every=args.progress_every,
         )
 
+    planner_plans: dict[str, SearchPlan] = {}
+    if "citation_planner" in methods:
+        if not args.planner_base_model or not args.planner_adapter:
+            raise SystemExit(
+                "citation_planner requires --planner-base-model and --planner-adapter."
+            )
+        print(
+            f"[candidates] loading citation planner base={args.planner_base_model} "
+            f"adapter={args.planner_adapter} examples={len(examples)}",
+            flush=True,
+        )
+        planner = LoRASearchPlanner(
+            base_model=args.planner_base_model,
+            adapter_path=args.planner_adapter,
+            config=PlannerGenerationConfig(
+                max_new_tokens=args.planner_max_new_tokens,
+                temperature=args.planner_temperature,
+                top_p=args.planner_top_p,
+                load_in_4bit=not args.planner_no_4bit,
+                bf16=not args.planner_no_bf16,
+            ),
+        )
+        for start in range(0, len(examples), args.planner_batch_size):
+            batch = examples[start : start + args.planner_batch_size]
+            generated = planner.generate(
+                [example.question_ko for example in batch],
+                batch_size=args.planner_batch_size,
+            )
+            for example, plan in zip(batch, generated):
+                planner_plans[example.example_id or ""] = plan
+            done = min(start + len(batch), len(examples))
+            if args.progress_every > 0 and (done == len(examples) or done == len(batch) or done % args.progress_every == 0):
+                pct = 100.0 * done / max(1, len(examples))
+                print(f"[candidates] planned {done}/{len(examples)} ({pct:.1f}%)", flush=True)
+
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     written = 0
@@ -201,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
             records = _records_for_example(
                 example,
                 machine_translation=translations.get(example.example_id or ""),
+                planner_plan=planner_plans.get(example.example_id or ""),
                 methods=methods,
             )
             for record in records:

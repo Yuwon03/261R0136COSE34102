@@ -18,6 +18,7 @@ from crosslingual_rewrite.citation import (  # noqa: E402
 )
 from crosslingual_rewrite.citation_retrieval import reciprocal_rank_fusion  # noqa: E402
 from crosslingual_rewrite.data import CorpusDocument  # noqa: E402
+from crosslingual_rewrite.search_planner import parse_search_plan_output  # noqa: E402
 
 
 class CitationUtilityTests(unittest.TestCase):
@@ -95,6 +96,25 @@ class FusionTests(unittest.TestCase):
             top_k=3,
         )
         self.assertEqual([hit.doc.doc_id for hit in fused], ["b", "a", "c"])
+
+
+class SearchPlannerParsingTests(unittest.TestCase):
+    def test_parse_search_plan_json_block(self) -> None:
+        plan = parse_search_plan_output(
+            'Here is the plan: {"queries": ["Lakers playoffs history"], "entities": ["Lakers"], '
+            '"answer_type": "date", "preferred_source_languages": ["en"], '
+            '"source_priority": ["official"]}',
+            question="언제 레이커스가 마지막으로 플레이오프에 진출했나요",
+        )
+        self.assertEqual(plan.method, "citation_planner")
+        self.assertEqual(plan.queries, ["Lakers playoffs history"])
+        self.assertEqual(plan.entities, ["Lakers"])
+
+    def test_parse_search_plan_falls_back_on_invalid_output(self) -> None:
+        plan = parse_search_plan_output("not json", question="질문")
+        self.assertEqual(plan.method, "citation_planner")
+        self.assertEqual(plan.queries, ["질문"])
+        self.assertEqual(plan.metadata["parse_error"], "missing_json")
 
 
 if __name__ == "__main__":
