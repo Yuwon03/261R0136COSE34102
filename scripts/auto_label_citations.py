@@ -18,7 +18,16 @@ from pathlib import Path
 from typing import Any
 
 
-METHODS = ("raw", "machine_translate", "gold_target", "entity_expand", "hyde", "query2doc", "multilingual_plan")
+METHODS = (
+    "raw",
+    "machine_translate",
+    "gold_target",
+    "entity_expand",
+    "hyde",
+    "query2doc",
+    "multilingual_plan",
+    "citation_planner",
+)
 VALID_LABELS = {"supported", "partial", "unsupported", "contradicted"}
 
 
@@ -95,6 +104,7 @@ def _truncate(text: str, max_chars: int) -> str:
 def _iter_unlabeled_items(
     input_path: Path,
     *,
+    methods: set[str],
     seen: set[tuple[str, str]],
     method_counts: Counter[str],
     per_method: int,
@@ -106,7 +116,7 @@ def _iter_unlabeled_items(
                 continue
             record = json.loads(line)
             method = _method(record)
-            if method not in METHODS or method_counts[method] >= per_method:
+            if method not in methods or method_counts[method] >= per_method:
                 continue
             for citation in record.get("citations") or []:
                 key = _citation_key(record, citation)
@@ -445,6 +455,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ai-labels-output", required=True, help="Append-only AI label JSONL.")
     parser.add_argument("--target-total", type=int, default=30000, help="Target total labels including human and AI.")
     parser.add_argument("--per-method", type=int, default=None, help="Override target labels per method.")
+    parser.add_argument(
+        "--methods",
+        default=",".join(METHODS),
+        help="Comma-separated methods to label. Use citation_planner for planner-only labeling.",
+    )
     parser.add_argument("--batch-size", type=int, default=30)
     parser.add_argument("--max-snippet-chars", type=int, default=650)
     parser.add_argument("--provider", choices=["openai", "gemini", "dry-run"], default="gemini")
@@ -470,12 +485,18 @@ def main(argv: list[str] | None = None) -> int:
     input_path = Path(args.input)
     output_path = Path(args.ai_labels_output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    selected_methods = {method.strip() for method in str(args.methods).split(",") if method.strip()}
+    unknown_methods = sorted(selected_methods - set(METHODS))
+    if unknown_methods:
+        raise SystemExit(f"Unknown method(s): {', '.join(unknown_methods)}")
+    if not selected_methods:
+        raise SystemExit("At least one method must be selected with --methods.")
 
     human_keys, human_counts = _read_label_file(Path(args.human_labels) if args.human_labels else None)
     ai_keys, ai_counts = _read_label_file(output_path)
     seen = set(human_keys) | set(ai_keys)
     method_counts = human_counts + ai_counts
-    per_method = int(args.per_method or ((args.target_total + len(METHODS) - 1) // len(METHODS)))
+    per_method = int(args.per_method or ((args.target_total + len(selected_methods) - 1) // len(selected_methods)))
 
     print(
         json.dumps(
@@ -486,7 +507,8 @@ def main(argv: list[str] | None = None) -> int:
                 "per_method": per_method,
                 "existing_human": sum(human_counts.values()),
                 "existing_ai": sum(ai_counts.values()),
-                "method_counts": {method: method_counts[method] for method in METHODS},
+                "methods": sorted(selected_methods),
+                "method_counts": {method: method_counts[method] for method in sorted(selected_methods)},
             },
             indent=2,
         )
@@ -507,6 +529,7 @@ def main(argv: list[str] | None = None) -> int:
     with output_path.open("a", encoding="utf-8") as out:
         for item in _iter_unlabeled_items(
             input_path,
+            methods=selected_methods,
             seen=seen,
             method_counts=method_counts,
             per_method=per_method,
@@ -540,7 +563,7 @@ def main(argv: list[str] | None = None) -> int:
                         {
                             "batches": batches,
                             "written": written,
-                            "method_counts": {method: method_counts[method] for method in METHODS},
+                            "method_counts": {method: method_counts[method] for method in sorted(selected_methods)},
                         },
                         ensure_ascii=False,
                     ),
@@ -549,7 +572,7 @@ def main(argv: list[str] | None = None) -> int:
             batch = []
             if args.limit_batches is not None and batches >= args.limit_batches:
                 break
-            if all(method_counts[method] >= per_method for method in METHODS):
+            if all(method_counts[method] >= per_method for method in selected_methods):
                 break
 
         if batch and (args.limit_batches is None or batches < args.limit_batches):
@@ -576,7 +599,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "ai_labels_output": str(output_path),
                 "new_labels": written,
-                "method_counts": {method: method_counts[method] for method in METHODS},
+                "method_counts": {method: method_counts[method] for method in sorted(selected_methods)},
             },
             indent=2,
         )
