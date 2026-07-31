@@ -1,0 +1,116 @@
+\begin{thebibliography}{10}
+
+\bibitem{longpre2020mkqa}
+Shayne Longpre, Yi~Lu, Tri Tu, et~al.
+\newblock {MKQA}: A linguistically diverse benchmark for multilingual open
+  domain question answering.
+\newblock {\em arXiv preprint arXiv:2007.15207}, 2020.
+
+\bibitem{clark2020tydi}
+Jonathan~H Clark, Eunsol Choi, Michael Collins, et~al.
+\newblock {TyDi QA}: A benchmark for information-seeking question answering in
+  typologically diverse languages.
+\newblock {\em Transactions of the Association for Computational Linguistics},
+  8:453--470, 2020.
+
+\bibitem{asai2020xor}
+Akari Asai, Jungo Bhardwaj, Hannaneh Zhou, et~al.
+\newblock {XOR QA}: Cross-lingual open-retrieval question answering.
+\newblock {\em arXiv preprint arXiv:2010.11856}, 2020.
+
+\bibitem{fang2023miracl}
+Xinyu Fang, Jimmy Lin, et~al.
+\newblock {MIRACL}: A multilingual information retrieval across 18 languages.
+\newblock {\em arXiv preprint arXiv:2304.14321}, 2023.
+
+\bibitem{nllb2022nllb}
+{NLLB Team}, Marta~R Costa-juss{\`a}, Jos{\`e} A~R Fonollosa, et~al.
+\newblock No language left behind: Scaling human-centered machine translation.
+\newblock {\em arXiv preprint arXiv:2207.04672}, 2022.
+
+\bibitem{bi2020constraint}
+Shuo Bi, Yanzhai Wang, Runze Li, et~al.
+\newblock Constraint translation candidates: A bridge between neural query
+  translation and cross-lingual information retrieval.
+\newblock In {\em Proceedings of the 2020 Conference on Empirical Methods in
+  Natural Language Processing (EMNLP)}, pages 3122--3131, 2020.
+
+\bibitem{chirkova2024mrag}
+Nadezhda Chirkova, David Rau, Herv{\'e} D{\'e}jean, Thibault Formal,
+  St{\'e}phane Clinchant, and Vassilina Nikoulina.
+\newblock Retrieval-augmented generation in multilingual settings.
+\newblock In {\em Proceedings of the 1st Workshop on Towards Knowledgeable
+  Language Models (KnowLLM)}, pages 177--188, 2024.
+
+\bibitem{wang2023query2doc}
+Liang Wang, Nan Yang, and Furu Wei.
+\newblock Query2doc: Query expansion with large language models.
+\newblock {\em arXiv preprint arXiv:2303.07678}, 2023.
+
+\bibitem{robertson2009bm25}
+Stephen Robertson and Hugo Zaragoza.
+\newblock The probabilistic relevance framework: {BM25} and beyond.
+\newblock {\em Foundations and Trends{\textregistered} in Information
+  Retrieval}, 3(4):333--428, 2009.
+
+\bibitem{gao2022precise}
+Luyu Gao, Zhuyun Dai, Liangming Pan, et~al.
+\newblock Precise zero-shot dense retrieval without relevance labels.
+\newblock {\em arXiv preprint arXiv:2212.10496}, 2022.
+
+\bibitem{ma2023rewrite}
+Kaixin Ma, Jiangang Jiao, et~al.
+\newblock Rewrite-retrieve-read: Re-thinking query rewriting for
+  retrieval-augmented large language models.
+\newblock {\em arXiv preprint arXiv:2305.14283}, 2023.
+
+\bibitem{anantha2021conqrr}
+Raviteja Anantha, Sanddeep Liu, et~al.
+\newblock {CONQRR}: Conversational query rewriting for retrieval with
+  reinforcement learning.
+\newblock {\em arXiv preprint arXiv:2112.08501}, 2021.
+
+\bibitem{wang2024rafe}
+Xizhe Wang, Kun Zhang, et~al.
+\newblock {RaFe}: Retrieval-aware feedback for query rewriting optimization.
+\newblock {\em arXiv preprint arXiv:2401.05432}, 2024.
+
+\bibitem{gao2023enabling}
+Luyu Gao, Seonghun Jeong, et~al.
+\newblock Enabling large language models to generate text with citations.
+\newblock {\em arXiv preprint arXiv:2305.14627}, 2023.
+
+\bibitem{es2023ragas}
+Shahul Es, Jigar Shah, et~al.
+\newblock {RAGAS}: Automated evaluation of retrieval augmented generation.
+\newblock {\em arXiv preprint arXiv:2309.15217}, 2023.
+
+\bibitem{chen2024bgem3}
+Jianlv Chen, Shitao Xiao, et~al.
+\newblock {BGE M3}-embedding: Multi-lingual, multi-functionality,
+  multi-granularity text embeddings through self-knowledge distillation.
+\newblock {\em arXiv preprint arXiv:2402.03216}, 2024.
+
+\bibitem{cormack2009reciprocal}
+Gordon~V Cormack, Charles L~A Clarke, and Stefan Buettcher.
+\newblock Reciprocal rank fusion outperforms condorcet and individual rank
+  learning methods.
+\newblock In {\em Proceedings of the 32nd international ACM SIGIR conference on
+  Research and development in information retrieval}, pages 758--759, 2009.
+
+\bibitem{qwen2024qwen}
+{Qwen Team}.
+\newblock {Qwen2.5} technical report.
+\newblock {\em arXiv preprint arXiv:2412.15115}, 2024.
+
+\bibitem{hu2021lora}
+Edward~J Hu, Yeliu Shen, Phillip Wallis, et~al.
+\newblock {LoRA}: Low-rank adaptation of large language models.
+\newblock {\em arXiv preprint arXiv:2106.09685}, 2021.
+
+\bibitem{dettmers2023qlora}
+Tim Dettmers, Artidoro Lewis, Younes Belkada, and Luke Zettlemoyer.
+\newblock {QLoRA}: Efficient finetuning of quantized llms.
+\newblock {\em arXiv preprint arXiv:2305.14314}, 2023.
+
+\end{thebibliography}

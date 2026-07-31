@@ -1,0 +1,101 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\citation{longpre2020mkqa}
+\citation{clark2020tydi}
+\citation{asai2020xor}
+\citation{fang2023miracl}
+\citation{nllb2022nllb}
+\citation{bi2020constraint}
+\citation{chirkova2024mrag}
+\citation{chirkova2024mrag}
+\citation{chirkova2024mrag}
+\citation{wang2023query2doc}
+\citation{robertson2009bm25}
+\citation{gao2022precise}
+\citation{ma2023rewrite}
+\citation{anantha2021conqrr}
+\citation{wang2024rafe}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Related Work}{2}{section.2}\protected@file@percent }
+\newlabel{sec:related_work}{{2}{2}{Related Work}{section.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{Cross-lingual information retrieval.}{2}{section*.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Multilingual RAG performance with different Wikipedia retrieval languages, adapted from Chirkova et al. \cite  {chirkova2024mrag}. Best score per row is bolded.}}{2}{table.1}\protected@file@percent }
+\newlabel{tab:mrag_retrieval_language}{{1}{2}{Multilingual RAG performance with different Wikipedia retrieval languages, adapted from Chirkova et al. \cite {chirkova2024mrag}. Best score per row is bolded}{table.1}{}}
+\@writefile{toc}{\contentsline {paragraph}{Query rewriting for retrieval.}{2}{section*.2}\protected@file@percent }
+\citation{gao2023enabling}
+\citation{es2023ragas}
+\citation{chen2024bgem3}
+\citation{cormack2009reciprocal}
+\citation{gao2022precise}
+\citation{wang2023query2doc}
+\citation{chen2024bgem3}
+\@writefile{toc}{\contentsline {paragraph}{Citation-aware RAG.}{3}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Approach}{3}{section.3}\protected@file@percent }
+\newlabel{sec:approach}{{3}{3}{Approach}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Candidate Search Plans}{3}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Citation Retrieval}{3}{subsection.3.2}\protected@file@percent }
+\citation{cormack2009reciprocal}
+\citation{qwen2024qwen}
+\citation{hu2021lora}
+\citation{dettmers2023qlora}
+\citation{longpre2020mkqa}
+\citation{asai2020xor}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Citation Scoring and Pseudo-Labels}{4}{subsection.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Citation Planner Fine-Tuning}{4}{subsection.3.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Implementation}{4}{subsection.3.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experiments}{5}{section.4}\protected@file@percent }
+\newlabel{sec:experiments}{{4}{5}{Experiments}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Data}{5}{subsection.4.1}\protected@file@percent }
+\newlabel{sec:data}{{4.1}{5}{Data}{subsection.4.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Evaluation Method}{5}{subsection.4.2}\protected@file@percent }
+\newlabel{sec:evaluation_method}{{4.2}{5}{Evaluation Method}{subsection.4.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Experimental Details}{5}{subsection.4.3}\protected@file@percent }
+\newlabel{sec:experimental_details}{{4.3}{5}{Experimental Details}{subsection.4.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Results}{6}{subsection.4.4}\protected@file@percent }
+\newlabel{sec:results}{{4.4}{6}{Results}{subsection.4.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Main citation retrieval results on 5,605 questions. Planner support metrics checked 47,360 labeled citations.}}{6}{table.2}\protected@file@percent }
+\newlabel{tab:citation_main_results}{{2}{6}{Main citation retrieval results on 5,605 questions. Planner support metrics checked 47,360 labeled citations}{table.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Analysis}{6}{section.5}\protected@file@percent }
+\newlabel{sec:analysis}{{5}{6}{Analysis}{section.5}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Comparison of raw querying, machine translation, strong LLM query expansion baselines, and the fine-tuned citation planner. Retrieval metrics measure gold-document recovery and ranking. Citation support metrics measure whether retrieved passages support the question.}}{7}{figure.1}\protected@file@percent }
+\newlabel{fig:citation_planner_comparison}{{1}{7}{Comparison of raw querying, machine translation, strong LLM query expansion baselines, and the fine-tuned citation planner. Retrieval metrics measure gold-document recovery and ranking. Citation support metrics measure whether retrieved passages support the question}{figure.1}{}}
+\bibstyle{unsrt}
+\bibdata{references}
+\bibcite{longpre2020mkqa}{{1}{}{{}}{{}}}
+\bibcite{clark2020tydi}{{2}{}{{}}{{}}}
+\bibcite{asai2020xor}{{3}{}{{}}{{}}}
+\bibcite{fang2023miracl}{{4}{}{{}}{{}}}
+\bibcite{nllb2022nllb}{{5}{}{{}}{{}}}
+\bibcite{bi2020constraint}{{6}{}{{}}{{}}}
+\bibcite{chirkova2024mrag}{{7}{}{{}}{{}}}
+\bibcite{wang2023query2doc}{{8}{}{{}}{{}}}
+\bibcite{robertson2009bm25}{{9}{}{{}}{{}}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{8}{section.6}\protected@file@percent }
+\newlabel{sec:conclusion}{{6}{8}{Conclusion}{section.6}{}}
+\bibcite{gao2022precise}{{10}{}{{}}{{}}}
+\bibcite{ma2023rewrite}{{11}{}{{}}{{}}}
+\bibcite{anantha2021conqrr}{{12}{}{{}}{{}}}
+\bibcite{wang2024rafe}{{13}{}{{}}{{}}}
+\bibcite{gao2023enabling}{{14}{}{{}}{{}}}
+\bibcite{es2023ragas}{{15}{}{{}}{{}}}
+\bibcite{chen2024bgem3}{{16}{}{{}}{{}}}
+\bibcite{cormack2009reciprocal}{{17}{}{{}}{{}}}
+\bibcite{qwen2024qwen}{{18}{}{{}}{{}}}
+\bibcite{hu2021lora}{{19}{}{{}}{{}}}
+\bibcite{dettmers2023qlora}{{20}{}{{}}{{}}}
+\providecommand\NAT@force@numbers{}\NAT@force@numbers
+\@writefile{toc}{\contentsline {section}{\numberline {A}Appendix: Team contributions}{10}{appendix.A}\protected@file@percent }
+\gdef \@abspage@last{10}

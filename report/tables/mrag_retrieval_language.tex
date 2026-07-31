@@ -1,0 +1,45 @@
+\begin{center}
+\vspace{0.4em}
+\centering
+\tiny
+\setlength{\tabcolsep}{2.8pt}
+\renewcommand{\arraystretch}{0.88}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrrr@{\hspace{1.4em}}lrrrrr}
+\toprule
+MKQA & No ret. & Eng. & User & Eng.+UL & All &
+XOR-TyDi QA & No ret. & Eng. & User & Eng.+UL & All \\
+\midrule
+English & 58.4 & \textbf{70.2} & -- & -- & 68.5 &
+English & 47.5 & \textbf{64.2} & -- & -- & 59.4 \\
+Arabic & 26.4 & 45.9 & 36.3 & \textbf{49.0} & 48.2 &
+Arabic & 47.7 & 52.9 & 65.5 & 66.6 & \textbf{66.8} \\
+Chinese & 21.4 & 29.1 & 22.5 & 27.2 & \textbf{31.0} &
+Finnish$\ddagger$ & 30.8 & 45.2 & 58.9 & \textbf{60.9} & 59.1 \\
+French & 48.4 & 62.6 & 56.3 & 65.0 & \textbf{66.2} &
+Japanese & 21.0 & 25.2 & 30.0 & 24.8 & \textbf{31.8} \\
+Finnish$\ddagger$ & 29.7 & 55.8 & 45.2 & 59.8 & \textbf{60.7} &
+Korean & 31.0 & 33.4 & 40.8 & 40.0 & \textbf{41.8} \\
+German & 47.8 & 64.6 & 54.8 & 65.5 & \textbf{66.9} &
+Russian$\dagger$ & 40.5 & 53.9 & 62.3 & 63.8 & \textbf{64.6} \\
+Italian & 51.5 & 61.2 & 56.8 & 64.8 & \textbf{66.3} &
+ & & & & & \\
+Japanese & 31.7 & \textbf{42.7} & 28.8 & 40.2 & 42.1 &
+ & & & & & \\
+Korean & 21.5 & 32.2 & 31.5 & \textbf{38.4} & 38.1 &
+ & & & & & \\
+Portuguese & 48.4 & 62.3 & 54.9 & 65.2 & \textbf{66.9} &
+ & & & & & \\
+Russian$\dagger$ & 38.1 & 55.0 & 51.0 & \textbf{61.0} & 59.4 &
+ & & & & & \\
+Spanish & 52.5 & 63.3 & 57.3 & 65.7 & \textbf{67.1} &
+ & & & & & \\
+Thai$\ddagger$ & 12.4 & 23.7 & 10.1 & 23.2 & \textbf{24.5} &
+ & & & & & \\
+\bottomrule
+\end{tabular}
+}
+\captionof{table}{Multilingual RAG performance with different Wikipedia retrieval languages, adapted from Chirkova et al. \cite{chirkova2024mrag}. Best score per row is bolded.}
+\label{tab:mrag_retrieval_language}
+\vspace{0.4em}
+\end{center}

@@ -1,0 +1,21 @@
+\begin{table}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3.5pt}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Method & Cand. & Cite & Cite & Cite & Unsup. & R@10 & MRR & nDCG@10 \\
+ & Score & F1 & Prec. & Rec. & Rate $\downarrow$ & & & \\
+\midrule
+Raw query & 0.339 & 0.530 & 0.485 & 0.637 & \textbf{0.150} & 0.235 & 0.154 & 0.174 \\
+Machine translation & 0.418 & 0.579 & 0.518 & 0.718 & 0.212 & 0.385 & 0.206 & 0.248 \\
+Query2Doc & 0.493 & 0.679 & 0.609 & 0.834 & 0.174 & 0.440 & 0.248 & 0.293 \\
+HyDE & 0.496 & \textbf{0.681} & \textbf{0.612} & 0.837 & 0.171 & \textbf{0.444} & \textbf{0.249} & \textbf{0.295} \\
+Citation planner & \textbf{0.496} & 0.670 & 0.521 & \textbf{0.967} & 0.300 & 0.388 & 0.218 & 0.258 \\
+\bottomrule
+\end{tabular}
+}
+\caption{Main citation retrieval results on 5,605 questions. Planner support metrics checked 47,360 labeled citations.}
+\label{tab:citation_main_results}
+\end{table}

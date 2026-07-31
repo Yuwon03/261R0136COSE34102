@@ -1,0 +1,268 @@
+\documentclass{article}
+
+\usepackage[final]{neurips_2020}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{capt-of}
+
+\newcommand{\note}[1]{\textcolor{blue}{{#1}}}
+
+\title{
+  Beyond Translation: Learning Structured Search Plans for Cross-Lingual Citation Retrieval\\
+  \vspace{1em}
+  \small{\normalfont Korea University COSE461 Final Project}
+}
+
+\author{
+  Yu won Choi \\
+  Department of Computer Science \\
+  Team 38 \\
+  2026951342
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+  With the rapid development of information retrieval technologies, modern search tasks increasingly rely on AI-based query engines.
+  However, because high-quality data is concentrated in a small number of major languages, substantial gaps remain in the quality and quantity of knowledge sources cited depending on the user’s query language.
+  One possible approach is to translate a low-resource language query into a high-resource language before using it as a prompt. While this can clearly improve access to data, literal translation may fail to capture localized entity aliases, document-style terminology, and evidence-oriented keywords that are essential for multilingual retrieval. To address this limitation, this project shifts the approach from literal translation to structured, task-specific search planning. Specifically, a Qwen2.5-7B LoRA model is trained to generate citation-seeking search plans for Korean and mixed-language questions, and the retrieved citations are evaluated using hybrid retrieval, reranking, and citation-support labels. The trained planner improves performance over raw queries and direct machine translation, and reaches a level competitive with strong LLM-based expansion baselines. However, precision limitations remain due to unsupported retrieval evidence.
+\end{abstract}
+
+\section{Introduction}
+Why is simple translation insufficient for multilingual knowledge retrieval? Language is far more complex than a literal mapping of meaning. 
+Even when expressions across languages are semantically equivalent, they often differ in specificity, naming conventions, implied context, and the terminology used in the target corpus. 
+A Korean or mixed Korean-English query may refer to an entity using a localized name, omit context that is obvious to native speakers, or require specific English aliases to retrieve relevant English documents. 
+In such cases, a direct English translation may be grammatically fluent, but still less effective as a search query.
+
+Therefore, the core problem addressed in this paper is not limited to Korean-to-English question translation. 
+Instead, we focus on structured search plan generation for multilingual citation retrieval. 
+An approach that simply translates Korean into English can be effective when the translation aligns with the wording of English documents, but it struggles when retrieval requires entity aliases, document-style keywords, answer-type hints, or evidence-oriented expressions.
+
+This limitation is important because the quality of retrieved citations directly affects the reliability of downstream generation. 
+If the search results return weak or irrelevant evidence, even a powerful language model can generate unsupported answers. 
+In multilingual settings, this problem becomes even more complex because the query and evidence may be in different languages, and the optimal source documents may use terminology that does not appear in a literal translation.
+
+To address this gap, we propose a citation-based search planner. 
+This planner generates a structured search plan that includes multiple search queries, target entities, aliases, answer types, fallback languages, and retrieval preferences. 
+This allows the system to search the corpus from several complementary perspectives, including exact keyword matching, entity-expanded matching, and evidence-oriented formulations.
+
+Experimental results show that citation-focused search planning outperforms simple Korean queries and direct machine translation. 
+Strong expansion methods such as HyDE and Query2Doc remain competitive, especially in ranking gold documents, but the trained planner achieves comparable overall candidate scores while producing substantially higher citation recall. 
+The main finding is that the most suitable query for citation retrieval is usually not the most literal translation, but the search formulation that best reveals the underlying evidence.
+
+\section{Related Work}
+\label{sec:related_work}
+
+Our work builds on research in cross-lingual information retrieval, retrieval-oriented query rewriting, and citation-aware retrieval-augmented generation.
+
+\paragraph{Cross-lingual information retrieval.}
+Cross-Lingual Information Retrieval (CLIR) studies retrieval settings where the query and target documents are written in different languages. This setting is central to multilingual question answering, where users may ask questions in a non-English language while high-coverage evidence sources are often English. Benchmarks such as MKQA \cite{longpre2020mkqa}, TyDi QA \cite{clark2020tydi}, XOR-TyDi \cite{asai2020xor}, and MIRACL \cite{fang2023miracl} have made this gap explicit. A common baseline is translate-then-retrieve, where the query is translated into the document language and then passed to a standard retriever. Strong machine translation systems such as NLLB \cite{nllb2022nllb} make this approach practical, but prior work has shown that translation quality does not always imply retrieval quality \cite{bi2020constraint}. A fluent translation may still omit entity aliases, document-style terminology, or evidence-bearing keywords needed to match the target collection.
+
+Recent multilingual RAG work further shows that the retrieval language itself changes performance on MKQA and XOR-TyDi QA. Chirkova et al. \cite{chirkova2024mrag} compare retrieval from English Wikipedia, user-language Wikipedia, English plus user-language Wikipedia, and all available languages. Their results show that Korean performance improves when retrieval is not restricted to English-only evidence, which supports our motivation that cross-lingual citation retrieval depends on evidence discovery strategy, not just fluent translation.
+
+\input{tables/mrag_retrieval_language}
+
+\paragraph{Query rewriting for retrieval.}
+Recent work addresses this mismatch by rewriting or expanding queries for retrieval rather than for fluency alone. Query2Doc \cite{wang2023query2doc} expands short queries into pseudo-documents, improving lexical matching for sparse retrievers such as BM25 \cite{robertson2009bm25}. HyDE \cite{gao2022precise} generates hypothetical answer documents and retrieves using their representations, showing that evidence-like generated text can improve retrieval. More broadly, the Rewrite-Retrieve-Read framework \cite{ma2023rewrite} argues that query rewriting should be optimized for downstream retrieval and reading performance. Related systems such as CONQRR \cite{anantha2021conqrr} and RaFe \cite{wang2024rafe} use retrieval feedback or ranking signals to improve rewritten queries. Our work follows this retrieval-aware direction in a cross-lingual setting, but generates structured search plans rather than a single rewritten query.
+
+\paragraph{Citation-aware RAG.}
+Retrieval-augmented generation depends not only on retrieving relevant documents, but on retrieving evidence that actually supports the final answer. Recent work such as ALCE \cite{gao2023enabling} and RAGAS \cite{es2023ragas} emphasizes citation quality, context precision, and faithfulness as core evaluation dimensions. Multilingual retrievers and rerankers such as BGE-M3 \cite{chen2024bgem3}, combined with fusion methods such as Reciprocal Rank Fusion \cite{cormack2009reciprocal}, can improve retrieval robustness. However, these systems remain limited by the initial query. Our approach therefore trains a citation-seeking planner that produces evidence-oriented search plans for Korean and mixed-language questions, aiming to improve citation retrieval beyond standard machine translation baselines.
+
+\section{Approach}
+\label{sec:approach}
+
+We formulate the task as citation-oriented cross-lingual retrieval. Given a Korean or mixed-language question $q_i$, the goal is not only to produce an English translation, but to generate a search plan that retrieves evidence passages useful for answering the question. A search plan $p_i$ is a structured object:
+\[
+p_i = \{\text{queries}, \text{entities}, \text{aliases}, \text{answer\_type},
+\text{preferred\_source\_languages}, \text{source\_priority}\}.
+\]
+
+Here, \texttt{queries} are the concrete search strings sent to the retriever; 
+\texttt{entities} are the main people, places, organizations, or concepts in the question; 
+\texttt{aliases} are alternative names or English variants of those entities; 
+\texttt{answer\_type} describes the expected form of the answer, such as a date, person, location, or number; 
+\texttt{preferred\_source\_languages} indicates which evidence languages should be searched first; 
+and \texttt{source\_priority} ranks the preferred evidence sources or retrieval directions.
+
+The key idea is that citation retrieval often requires more than semantic translation: it may require entity aliases, document-style keywords, answer-type hints, and multiple alternative queries.
+
+\subsection{Candidate Search Plans}
+
+For each question $q_i$, we first generate several candidate search plans using fixed baseline strategies. These candidates are used both for evaluation and for constructing pseudo-labels for planner training.
+
+The candidate methods are:
+\begin{itemize}
+    \item \textbf{raw}: use the original Korean or mixed-language question directly as the retrieval query.
+    \item \textbf{machine\_translate}: translate the question into English and retrieve using the translated query.
+    \item \textbf{entity\_expand}: expand the translated or target query with extracted entities and answer keywords.
+    \item \textbf{HyDE}: generate an evidence-like hypothetical document query, following the motivation of HyDE \cite{gao2022precise}.
+    \item \textbf{query2doc}: expand the question into a document-style query, inspired by Query2Doc \cite{wang2023query2doc}.
+    \item \textbf{multilingual\_plan}: combine English and Korean query variants in a single search plan.
+    \item \textbf{gold\_target}: use the dataset-provided English target query as an upper-bound reference.
+\end{itemize}
+
+The \texttt{gold\_target} method is used only for comparison and is excluded from planner training, since it is not available in real deployment. This avoids training the model to copy an oracle query that would not exist at inference time.
+
+\subsection{Citation Retrieval}
+
+Each search plan may contain multiple queries. For every query in the plan, we retrieve documents using a hybrid retrieval pipeline. We use BM25 for sparse lexical matching and BGE-M3 \cite{chen2024bgem3} for dense multilingual retrieval. BM25 is useful for exact entities, dates, and titles, while BGE-M3 helps when the Korean or translated query is semantically related to English evidence but does not share many exact tokens.
+
+The ranked lists are combined using Reciprocal Rank Fusion (RRF) \cite{cormack2009reciprocal}:
+\[
+\text{RRF}(d) = \sum_{r \in R} \frac{1}{k + \text{rank}_r(d)},
+\]
+where $R$ is the set of ranked lists and $k$ is a fixed smoothing constant. The fused candidates are then reranked with a cross-encoder reranker. This produces a ranked list of citation candidates $C_i^m$ for question $q_i$ and method $m$.
+
+\subsection{Citation Scoring and Pseudo-Labels}
+
+Each retrieved citation is labeled as \texttt{supported}, \texttt{partial}, \texttt{unsupported}, or \texttt{contradicted}. The support rubric combines human preferences about acceptable evidence with objective signals such as answer containment and positive-document matching. When direct human labels are unavailable, an AI judge applies this fixed rubric so that citation support can be evaluated consistently across methods.
+
+For each candidate method $m$, we compute a citation score:
+\begin{equation*}
+\begin{split}
+S_i^m = \; & 0.30 \cdot \text{Recall@10} + 0.20 \cdot \text{MRR} \\
+& + 0.20 \cdot \text{CitationPrecision} + 0.15 \cdot \text{CitationRecall} \\
+& + 0.10 \cdot \text{UsefulEnglishRatio} + 0.05 \cdot \text{Faithfulness}.
+\end{split}
+\end{equation*}
+
+This score is designed to reward search plans that retrieve useful, answer-supporting English citations. For each question, we select the best non-gold candidate as the pseudo-label:
+\[
+p_i^* = \arg\max_{m \in M \setminus \{\text{gold\_target}\}} S_i^m.
+\]
+This is the main supervision signal for our planner. Instead of training the model to imitate translations, we train it to imitate search plans that empirically retrieved better citations.
+
+\subsection{Citation Planner Fine-Tuning}
+
+We fine-tune a Qwen2.5-7B-Instruct model \cite{qwen2024qwen} to generate citation-seeking search plans. The input is the original Korean or mixed-language question, and the output is the selected structured JSON search plan $p_i^*$. We train with supervised fine-tuning using a standard causal language modeling loss:
+\[
+\mathcal{L}_{\text{SFT}}
+= - \sum_{t=1}^{T} \log P_\theta(y_t \mid q_i, y_{<t}),
+\]
+where $y_t$ is the $t$-th token of the target search-plan JSON. Prompt tokens are masked so that the loss is applied only to the assistant output.
+
+For efficiency, we use parameter-efficient fine-tuning with LoRA \cite{hu2021lora} and QLoRA \cite{dettmers2023qlora}. At inference time, the trained planner receives a question and generates a search plan containing multiple evidence-oriented queries, entities, aliases, answer type, and source preferences.
+
+\subsection{Implementation}
+
+We implemented the citation candidate generation, retrieval, scoring, pseudo-label construction, and planner inference pipeline. The sparse BM25 retriever is implemented locally. For external components, we use HuggingFace Transformers for model loading and generation, PEFT for LoRA/QLoRA fine-tuning, NLLB for machine translation, and SentenceTransformers for BGE-M3 retrieval and reranking. These components are used as standard pretrained models; our contribution is the citation-oriented training pipeline and structured search-plan formulation.
+
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Data}
+\label{sec:data}
+
+We construct a Korean and mixed-language question dataset from MKQA \cite{longpre2020mkqa} and XOR-TyDi \cite{asai2020xor}. MKQA provides multilingual question-answer pairs, while XOR-TyDi contains cross-lingual questions that often require evidence from English sources. After preprocessing and filtering, our main training and evaluation file contains 5,605 Korean or mixed-language questions:
+\[
+\mathcal{D} = \{(q_i, a_i, t_i, d_i^+, d_i^-)\}_{i=1}^{N},
+\]
+where $q_i$ is the Korean or mixed-language question, $a_i$ is the set of gold answers, $t_i$ is an English target query when available, $d_i^+$ is a positive evidence document, and $d_i^-$ is a negative document.
+
+The retrieval corpus is an English Wikipedia collection containing 300,000 passages. This creates a cross-lingual retrieval setting: the input question is Korean or mixed-language, but the target evidence is primarily English. The task is therefore not simply to translate $q_i$ into English, but to generate a search plan that retrieves useful English citation candidates.
+
+Each model or baseline outputs a search plan:
+\[
+p_i = \{\text{queries}, \text{entities}, \text{aliases}, \text{answer\_type},
+\text{preferred\_source\_languages}, \text{source\_priority}\}.
+\]
+The retrieval system then uses the queries in $p_i$ to retrieve citation candidates from the English Wikipedia corpus.
+
+\subsection{Evaluation Method}
+\label{sec:evaluation_method}
+
+We evaluate methods by the quality of the citations they retrieve. For each question and method, the retriever returns a ranked list of citation candidates. We compute both retrieval-oriented metrics and citation-support metrics.
+
+For retrieval quality, we report Recall@$k$, MRR, and NDCG@10. Recall@$k$ measures whether the known positive document appears in the top $k$ retrieved candidates:
+\[
+\mathrm{Recall@}k(i) =
+\mathbb{I}\!\left[d_i^+ \in C_{i,1:k}\right],
+\]
+where $C_{i,1:k}$ is the top-$k$ retrieved candidate list for question $i$. MRR measures how highly the first positive document is ranked:
+\[
+\mathrm{MRR}(i) =
+\begin{cases}
+1 / r_i, & \text{if } d_i^+ \text{ is retrieved at rank } r_i,\\
+0, & \text{otherwise.}
+\end{cases}
+\]
+NDCG@10 similarly rewards placing the positive document near the top of the ranked list.
+
+For citation quality, each citation is labeled as \texttt{supported}, \texttt{partial}, \texttt{unsupported}, or \texttt{contradicted}. The label definition combines preference-based judgments about whether a passage is acceptable evidence with objective checks such as answer containment and positive-document matching. In this setting, human labels provide the direct preference signal, while the AI judge applies the same rubric to additional examples so that the evaluation can remain both scalable and consistent across all methods. We then compute citation precision, citation recall, citation F1, unsupported claim rate, and useful English citation ratio. Citation precision measures the fraction of judged citations that actually support the answer, while useful English citation ratio measures how often a method retrieves English citations that are useful for answering the Korean question.
+
+We combine these signals into an overall candidate score using the same formula described in Section~\ref{sec:approach}. This score is used to compare retrieval strategies and to select pseudo-labels for planner training.
+
+\subsection{Experimental Details}
+\label{sec:experimental_details}
+
+We compare the trained citation planner against several baselines: \texttt{raw}, \texttt{machine\_translate}, \texttt{entity\_expand}, \texttt{hyde}, \texttt{query2doc}, \texttt{multilingual\_plan}, and \texttt{gold\_target}. The \texttt{raw} baseline retrieves using the original Korean question. \texttt{machine\_translate} retrieves using an English translation. \texttt{entity\_expand}, \texttt{hyde}, and \texttt{query2doc} add retrieval-oriented expansion. \texttt{multilingual\_plan} combines Korean and English query variants. \texttt{gold\_target} uses the dataset-provided English target query and is treated only as an upper-bound reference.
+
+All methods use the same retrieval pipeline. We first retrieve with BM25 and BGE-M3 dense retrieval, combine ranked lists with Reciprocal Rank Fusion, and then rerank the fused candidates with a cross-encoder reranker. This ensures that differences in performance come from the search plan rather than from different retrievers.
+
+To train the citation planner, we first score all non-planner candidate methods and select the best non-\texttt{gold\_target} search plan for each question as a pseudo-label. We fine-tune Qwen2.5-7B-Instruct using QLoRA on these pseudo-labeled search plans. The model input is the original Korean or mixed-language question, and the output is a structured JSON search plan. The trained adapter is then used to generate \texttt{citation\_planner} candidates, which are evaluated using the same retrieval and citation-scoring pipeline as the baselines.
+
+\subsection{Results}
+\label{sec:results}
+
+\input{tables/citation_main_results}
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=\linewidth]{figures/citation_planner_comparison.png}
+    \caption{Comparison of raw querying, machine translation, strong LLM query expansion baselines, and the fine-tuned citation planner. Retrieval metrics measure gold-document recovery and ranking. Citation support metrics measure whether retrieved passages support the question.}
+    \label{fig:citation_planner_comparison}
+\end{figure}
+
+Table~\ref{tab:citation_main_results} and Figure~\ref{fig:citation_planner_comparison} summarize the quantitative results. The first clear result is that the planner improves over both raw Korean querying and direct machine translation. Compared with machine translation, candidate score rises from 0.418 to 0.496, citation F1 from 0.579 to 0.670, MRR from 0.206 to 0.218, and NDCG@10 from 0.248 to 0.258. This supports the main hypothesis that optimizing for citation-seeking retrieval is more useful than optimizing only for literal translation quality.
+
+The second result is that the planner becomes competitive with strong LLM expansion baselines in overall candidate score. The planner reaches 0.496, nearly tied with HyDE at 0.496 and slightly above Query2Doc at 0.493. This was better than expected because HyDE and Query2Doc are strong baselines that generate rich pseudo-evidence text and usually improve broad retrieval recall.
+
+The third result is a trade-off. HyDE and Query2Doc still outperform the planner on gold-document retrieval and ranking: HyDE obtains Recall@10 of 0.444, MRR of 0.249, and NDCG@10 of 0.295, while the planner obtains 0.388, 0.218, and 0.258. However, the planner has much higher citation recall, 0.967 compared with 0.837 for HyDE and 0.834 for Query2Doc. This means the planner is very likely to retrieve at least one useful supporting citation, but it is less precise and retrieves more unsupported evidence. Its unsupported rate is 0.300, higher than HyDE's 0.171 and Query2Doc's 0.174.
+
+Overall, the results show that the proposed planner succeeds at improving over direct machine translation and raw querying, but does not fully dominate strong LLM expansion methods. The planner behaves as a recall-oriented citation search strategy: it broadens evidence discovery and often finds useful citations, but it still needs better filtering or reranking to reduce unsupported passages.
+
+\section{Analysis}
+\label{sec:analysis}
+
+The qualitative examples show why the planner improves over simple translation. A translation baseline mainly asks: ``What does this Korean question mean in English?'' The planner asks a more retrieval-focused question: ``What English evidence would help prove the answer?'' Because of this, the planner does not usually produce only one translated sentence. It often generates several search variants, including an English keyword query, a natural English question, and sometimes the original Korean query as a fallback. It also highlights important entities, aliases, expected answer types, and time clues.
+
+This behavior explains the gain over machine translation. Direct translation preserves the user's question, but it does not necessarily add the document-style terms, aliases, or answer clues needed to match English Wikipedia passages. The planner often rewrites a question into a more search-like form, which improves candidate score, citation recall, and useful English citation coverage.
+
+For example, for a Korean question asking when Michigan last beat Ohio State, the planner generated a query containing both the teams and a likely year. This retrieved supported Michigan football evidence. This kind of query is more retrieval-oriented than a literal translation, because it contains the entity names and event framing that the English index is likely to contain.
+
+The failure cases show the limitation of this strategy. First, the planner sometimes over-expands or guesses a clue that is not reliable. A query may include a year or entity alias that helps when correct, but can narrow retrieval toward the wrong page when incorrect. Second, ambiguous English terms can hurt retrieval. For a Tom Brady question about his first championship ring, the term ``ring'' can also match unrelated boxing or award pages, producing unsupported citations. Third, song-title and movie-title questions are fragile: small wording errors or literal translations can retrieve pages that share surface terms but do not answer the question.
+
+These observations suggest that the planner has learned to generate broad evidence-seeking queries, but has not fully learned citation filtering. This matches the metrics: citation recall is high, but citation precision and unsupported rate are weaker than HyDE and Query2Doc. The current SFT objective teaches the model to imitate high-scoring plans, but it does not directly penalize every unsupported top-10 citation. A stronger future system should combine the planner with a more selective citation reranker or preference optimization objective that explicitly contrasts supported and unsupported evidence.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+This project studied citation-aware cross-lingual retrieval for Korean and mixed-language questions over an English Wikipedia corpus. Instead of treating the task as simple machine translation, we trained a Qwen2.5-7B LoRA search planner to generate citation-seeking search plans. The pipeline combines candidate search-plan generation, hybrid retrieval, reranking, human and AI citation labeling, and citation-aware scoring.
+
+The main finding is that the learned citation planner improves over raw querying and direct machine translation. It achieves a substantially higher candidate score and citation F1 than machine translation, showing that retrieval-oriented planning is a better objective than literal translation alone. Against stronger LLM expansion baselines such as HyDE and Query2Doc, the planner is competitive in overall candidate score and achieves higher citation recall, but it is weaker on gold-document ranking and citation precision. This indicates that the planner is good at finding useful evidence somewhere in the retrieved set, but still retrieves too many unsupported passages.
+
+The primary achievement of this project is the construction of a complete citation-aware training and evaluation loop. We generated baseline citation candidates, labeled citation support, trained a fine-tuned search planner, evaluated it on the full dataset of 5,605 questions, and produced quantitative comparisons against raw querying, machine translation, HyDE, and Query2Doc baselines. The main limitation is that the current planner prioritizes recall more than precision.
+
+Future work should focus on improving evidence filtering. The most direct next steps are to train with preference optimization over supported versus unsupported citations, add a citation-specific reranker after retrieval, and test hybrid fusion between the planner and strong expansion methods such as HyDE or Query2Doc. These extensions could preserve the planner's high citation recall while reducing unsupported evidence.
+
+\bibliographystyle{unsrt}
+\bibliography{references}
+
+\newpage
+\appendix
+
+\section{Appendix: Team contributions}
+
+\end{document}
